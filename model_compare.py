@@ -19,7 +19,7 @@ from pathlib import Path
 
 # Use fork context to avoid macOS spawn re-importing catboost/xgboost in workers
 _mp_ctx = multiprocessing.get_context('fork')
-N_WORKERS = min(10, multiprocessing.cpu_count())
+N_WORKERS = config.SIM_WORKERS
 
 from sklearn.ensemble import (
     RandomForestClassifier, GradientBoostingClassifier,

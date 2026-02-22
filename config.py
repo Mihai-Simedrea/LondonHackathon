@@ -34,8 +34,10 @@ ROAD_SPEED = 7.0
 SPAWN_INTERVAL = 55
 
 # Simulation settings
+import multiprocessing as _mp
 SIMS_PER_MODEL = 50
-BATCH_SIZE = 13
+SIM_WORKERS = max(2, _mp.cpu_count() - 4)
+BATCH_SIZE = 10
 
 # File paths
 EEG_CSV = DATA_DIR / "eeg_recording.csv"

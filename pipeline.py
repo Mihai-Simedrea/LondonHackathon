@@ -13,7 +13,10 @@ def cmd_collect(args):
     import subprocess
     print("Starting EEG recording + game...")
     print("Press Ctrl+C to stop recording.\n")
-    subprocess.run([sys.executable, "server.py", "--record"])
+    result = subprocess.run([sys.executable, "server.py", "--record"])
+    if result.returncode != 0:
+        print(f"\nCollection failed (exit code {result.returncode}). Aborting.")
+        sys.exit(1)
 
 
 def cmd_process(args):

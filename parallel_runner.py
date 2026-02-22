@@ -57,7 +57,7 @@ def run_simulations(model_path, n_sims=None, batch_size=None):
 
         args_list = [(str(model_path), seed) for seed in batch_seeds]
 
-        with multiprocessing.Pool(processes=len(batch_seeds)) as pool:
+        with multiprocessing.Pool(processes=min(len(batch_seeds), config.SIM_WORKERS)) as pool:
             results = pool.map(_run_single_sim, args_list)
 
         all_runs.extend(results)
