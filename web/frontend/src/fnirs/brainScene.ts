@@ -8,8 +8,8 @@ import type {
   HeatmapWindowPayload,
 } from './types';
 
-const DEFAULT_NEUTRAL = new THREE.Color(0x3e5878);
-const MID_NEUTRAL = new THREE.Color(0x5878a3);
+const DEFAULT_NEUTRAL = new THREE.Color(0x4a6385);
+const MID_NEUTRAL = new THREE.Color(0x6688b6);
 const COLD_COLOR = new THREE.Color(0x2f78ff);
 const HOT_COLOR = new THREE.Color(0xff6d52);
 const GHOST_TINT = new THREE.Color(0xcde6ff);
@@ -93,14 +93,15 @@ export class FnirsBrainScene {
   private assetModeActive = false;
   private gltfLoader = new GLTFLoader();
   private stlLoader = new STLLoader();
-  private readonly baseRotX = 0.18;
-  private readonly baseRotY = -1.18;
-  private readonly baseRotZ = -0.16;
-  private userRoll = 0;
-  private userRollTarget = 0;
-  private draggingRoll = false;
+  private baseRotX = 0.35;
+  private baseRotY = 1.28;
+  private baseRotZ = 0.55;
+  private autoRotateEnabled = true;
+  private userYaw = 0;
+  private userYawTarget = 0;
+  private draggingRotate = false;
   private dragStartX = 0;
-  private dragStartRoll = 0;
+  private dragStartYaw = 0;
   private interactResumeAt = 0;
 
   constructor(container: HTMLElement) {
@@ -117,19 +118,20 @@ export class FnirsBrainScene {
     this.container.style.touchAction = 'none';
 
     this.camera = new THREE.PerspectiveCamera(35, 1, 0.01, 100);
-    this.camera.position.set(4.2, 2.35, 2.35);
-    this.camera.lookAt(0, -0.02, -0.02);
+    this.camera.position.set(4.05, 2.45, 2.0);
+    this.camera.lookAt(0, -0.01, -0.03);
+    this.applyDebugOverridesFromUrl();
 
-    const key = new THREE.DirectionalLight(0xffffff, 1.18);
-    key.position.set(2.6, 3.35, 2.35);
+    const key = new THREE.DirectionalLight(0xffffff, 1.26);
+    key.position.set(2.9, 3.2, 2.0);
     this.scene.add(key);
-    const fill = new THREE.DirectionalLight(0xb5d6ff, 0.88);
-    fill.position.set(-2.8, 1.35, 2.45);
+    const fill = new THREE.DirectionalLight(0xc0dcff, 0.98);
+    fill.position.set(-2.7, 1.45, 2.25);
     this.scene.add(fill);
-    const rim = new THREE.DirectionalLight(0xd7e8ff, 0.62);
-    rim.position.set(-2.2, -1.4, -2.6);
+    const rim = new THREE.DirectionalLight(0xe4efff, 0.72);
+    rim.position.set(-2.0, -1.15, -2.45);
     this.scene.add(rim);
-    const hemi = new THREE.HemisphereLight(0xd9ebff, 0x243041, 0.94);
+    const hemi = new THREE.HemisphereLight(0xe3f1ff, 0x2b3646, 1.02);
     this.scene.add(hemi);
 
     window.addEventListener('resize', this.onResize);
@@ -321,7 +323,7 @@ export class FnirsBrainScene {
 
     this.root.scale.setScalar(1.24);
     this.root.position.set(0.0, -0.02, -0.12);
-    this.root.rotation.set(this.baseRotX, this.baseRotY, this.baseRotZ + this.userRoll);
+    this.root.rotation.set(this.baseRotX, this.baseRotY + this.userYaw, this.baseRotZ);
 
     this.displayCurrentWindow = null;
     this.targetCurrentWindow = null;
@@ -416,9 +418,9 @@ export class FnirsBrainScene {
 
   private onPointerDown = (ev: PointerEvent) => {
     if (ev.button !== 0) return;
-    this.draggingRoll = true;
+    this.draggingRotate = true;
     this.dragStartX = ev.clientX;
-    this.dragStartRoll = this.userRollTarget;
+    this.dragStartYaw = this.userYawTarget;
     this.interactResumeAt = performance.now() + 3200;
     this.container.classList.add('fnirs-dragging');
     try {
@@ -429,16 +431,16 @@ export class FnirsBrainScene {
   };
 
   private onPointerMove = (ev: PointerEvent) => {
-    if (!this.draggingRoll) return;
+    if (!this.draggingRotate) return;
     const dx = ev.clientX - this.dragStartX;
-    const rollDelta = dx * 0.0054;
-    this.userRollTarget = clamp(this.dragStartRoll + rollDelta, -Math.PI, Math.PI);
+    const yawDelta = dx * 0.0048;
+    this.userYawTarget = clamp(this.dragStartYaw + yawDelta, -Math.PI, Math.PI);
     this.interactResumeAt = performance.now() + 3200;
   };
 
   private onPointerUp = (ev: PointerEvent) => {
-    if (!this.draggingRoll) return;
-    this.draggingRoll = false;
+    if (!this.draggingRotate) return;
+    this.draggingRotate = false;
     this.interactResumeAt = performance.now() + 3200;
     this.container.classList.remove('fnirs-dragging');
     try {
@@ -448,6 +450,25 @@ export class FnirsBrainScene {
     }
   };
 
+  private applyDebugOverridesFromUrl() {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const getNum = (key: string): number | null => {
+      const raw = params.get(key);
+      if (raw === null || raw === '') return null;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : null;
+    };
+    const rx = getNum('rx');
+    const ry = getNum('ry');
+    const rz = getNum('rz');
+    if (rx !== null) this.baseRotX = rx;
+    if (ry !== null) this.baseRotY = ry;
+    if (rz !== null) this.baseRotZ = rz;
+    const auto = params.get('auto');
+    if (auto === '0' || auto === 'false') this.autoRotateEnabled = false;
+  }
+
   private animate = () => {
     this.rafId = requestAnimationFrame(this.animate);
     const dt = Math.min(this.clock.getDelta(), 0.1);
@@ -456,10 +477,10 @@ export class FnirsBrainScene {
 
     const smoothFast = 1 - Math.exp(-dt * 10.5);
     const smoothScale = 1 - Math.exp(-dt * 6.5);
-    const smoothRoll = 1 - Math.exp(-dt * 12.0);
+    const smoothYaw = 1 - Math.exp(-dt * 12.0);
     this.displayScaleMaxAbs = lerp(this.displayScaleMaxAbs, this.targetScaleMaxAbs, smoothScale);
     this.currentScaleMaxAbs = this.displayScaleMaxAbs;
-    this.userRoll = lerp(this.userRoll, this.userRollTarget, smoothRoll);
+    this.userYaw = lerp(this.userYaw, this.userYawTarget, smoothYaw);
 
     this.displayCurrentWindow = lerpWindow(this.displayCurrentWindow, this.targetCurrentWindow, smoothFast);
     for (let i = 0; i < 3; i++) {
@@ -472,12 +493,12 @@ export class FnirsBrainScene {
       this.applyWindowToMesh(g, ghost, 0.0, true);
     });
 
-    const autoEnabled = performance.now() > this.interactResumeAt;
+    const autoEnabled = this.autoRotateEnabled && performance.now() > this.interactResumeAt;
     const autoX = autoEnabled ? 0.008 * Math.sin(t * 0.15) : 0;
     const autoY = autoEnabled ? 0.016 * Math.sin(t * 0.18) : 0;
     this.root.rotation.x = this.baseRotX + autoX;
-    this.root.rotation.y = this.baseRotY + autoY;
-    this.root.rotation.z = this.baseRotZ + this.userRoll;
+    this.root.rotation.y = this.baseRotY + this.userYaw + autoY;
+    this.root.rotation.z = this.baseRotZ;
     this.anchorMarkers.forEach((m, i) => {
       const s = 1 + 0.15 * Math.sin(t * 2.2 + i);
       m.scale.setScalar(s);

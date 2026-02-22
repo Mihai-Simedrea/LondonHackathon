@@ -1,7 +1,7 @@
 body.fnirs-heatmap-page {
   background:
-    radial-gradient(980px 600px at 55% 35%, rgba(112, 126, 148, 0.28) 0%, rgba(58, 69, 84, 0.18) 38%, rgba(14, 18, 26, 0) 72%),
-    radial-gradient(1500px 820px at 60% 7%, #3a4556 0%, #1c2432 40%, #0f141e 70%, #090c13 100%);
+    radial-gradient(1050px 640px at 55% 35%, rgba(136, 149, 170, 0.34) 0%, rgba(74, 86, 103, 0.2) 38%, rgba(18, 22, 31, 0) 74%),
+    radial-gradient(1580px 860px at 60% 7%, #465366 0%, #222b39 40%, #111723 70%, #0a0e15 100%);
 }
 
 body.fnirs-heatmap-page #bg-canvas {
