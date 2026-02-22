@@ -48,23 +48,55 @@ def build_dataset(game_jsonl_path=None, oc_scores_csv_path=None, output_path=Non
     oc_scores_csv_path = oc_scores_csv_path or config.OC_SCORES_CSV
     output_path = output_path or (config.DATA_DIR / "dataset_full.csv")
 
-    # Read OC scores
-    oc_scores = {}
+    # Read OC scores — index by wall-clock timestamp for accurate matching
+    oc_timestamps = []  # sorted list of (timestamp, oc_score)
+    oc_by_sec = {}      # fallback: sec -> oc_score (for synthetic data)
     with open(oc_scores_csv_path, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            sec = int(row['sec'])
-            oc_scores[sec] = float(row['oc_score'])
+            oc_by_sec[int(row['sec'])] = float(row['oc_score'])
+            if 'timestamp' in row and row['timestamp']:
+                oc_timestamps.append((float(row['timestamp']), float(row['oc_score'])))
+    oc_timestamps.sort()
 
     # Read game recording and merge
     rows = []
+    unmatched = 0
     with open(game_jsonl_path, 'r') as f:
         for line in f:
             record = json.loads(line.strip())
-            sec = record['sec']
 
-            # Get OC score (default 0.5 if missing)
-            oc = oc_scores.get(sec, 0.5)
+            # Match by wall-clock timestamp if available, else fall back to sec
+            oc = None
+            if oc_timestamps and 't' in record:
+                game_ts = float(record['t'])
+                # Binary search for nearest OC timestamp
+                best_dist = float('inf')
+                best_oc = None
+                lo, hi = 0, len(oc_timestamps) - 1
+                while lo <= hi:
+                    mid = (lo + hi) // 2
+                    dist = abs(oc_timestamps[mid][0] - game_ts)
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_oc = oc_timestamps[mid][1]
+                    if oc_timestamps[mid][0] < game_ts:
+                        lo = mid + 1
+                    else:
+                        hi = mid - 1
+                if best_dist <= 2.0:  # within 2 second tolerance
+                    oc = best_oc
+                else:
+                    unmatched += 1
+            else:
+                # Fallback for synthetic data (no wall-clock timestamps)
+                sec = record.get('sec', record.get('s', 0))
+                oc = oc_by_sec.get(sec)
+                if oc is None:
+                    unmatched += 1
+
+            if oc is None:
+                oc = 0.5  # default for unmatched
 
             # Compute per-lane obstacle distances
             distances = _compute_nearest_obstacle_distances(record.get('obs', []))
@@ -87,6 +119,8 @@ def build_dataset(game_jsonl_path=None, oc_scores_csv_path=None, output_path=Non
         writer.writeheader()
         writer.writerows(rows)
 
+    if unmatched > 0:
+        print(f"  ⚠ {unmatched}/{len(rows)} game records had no matching OC score (assigned 0.5)")
     print(f"  Dataset built: {output_path} ({len(rows)} rows)")
     return output_path
 

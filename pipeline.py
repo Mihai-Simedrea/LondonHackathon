@@ -130,6 +130,14 @@ def cmd_demo(args):
     cmd_process(args)
     print(f"  Step time: {time.time() - step_start:.1f}s")
 
+    # Check for insufficient clean data
+    import csv as _csv
+    with open(config.DATASET_CLEAN, 'r') as _f:
+        clean_count = sum(1 for _ in _csv.reader(_f)) - 1  # minus header
+    if clean_count < 20:
+        print(f"\n  ⚠ Only {clean_count} clean rows — model will be unreliable.")
+        print("    Try recording for at least 60 seconds for usable results.")
+
     # Step 2: Train
     step_start = time.time()
     print("\n[2/5] Training models...")

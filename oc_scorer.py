@@ -46,17 +46,19 @@ def compute_oc_scores(eeg_csv_path, output_path=None):
     """
     eeg_csv_path = Path(eeg_csv_path)
 
-    # --- Read CSV, extract frontal channels ---
+    # --- Read CSV, extract timestamps + frontal channels ---
+    timestamps = []
     rows = []
     with open(eeg_csv_path, "r", newline="") as f:
         reader = csv.reader(f)
         header = next(reader, None)  # skip header
         for row in reader:
             # columns: timestamp, ch0, ch1, ..., ch19
-            # frontal channel indices offset by 1 for the timestamp column
+            timestamps.append(float(row[0]))
             frontal = [float(row[ch + 1]) for ch in FRONTAL_CHANNELS]
             rows.append(frontal)
 
+    timestamps = np.array(timestamps)
     data = np.array(rows, dtype=np.float64)  # shape (n_samples, 4)
     n_samples = data.shape[0]
 
@@ -68,11 +70,16 @@ def compute_oc_scores(eeg_csv_path, output_path=None):
     fatigue_indices = []
     engagement_indices = []
     window_secs = []
+    window_timestamps = []
 
     sec = 0
     start = 0
     while start + WINDOW_SAMPLES <= n_samples:
         window = data[start : start + WINDOW_SAMPLES, :]  # (1000, 4)
+
+        # Wall-clock timestamp at midpoint of this window
+        mid = start + WINDOW_SAMPLES // 2
+        window_ts = float(timestamps[min(mid, n_samples - 1)])
 
         # PSD per frontal channel via Welch
         psds = []
@@ -95,6 +102,7 @@ def compute_oc_scores(eeg_csv_path, output_path=None):
         fatigue_indices.append(fatigue_idx)
         engagement_indices.append(engagement_idx)
         window_secs.append(sec)
+        window_timestamps.append(window_ts)
 
         start += STRIDE_SAMPLES
         sec += STRIDE_SEC
@@ -136,6 +144,7 @@ def compute_oc_scores(eeg_csv_path, output_path=None):
         results.append(
             {
                 "sec": window_secs[i],
+                "timestamp": round(window_timestamps[i], 2),
                 "fatigue_idx": round(float(fatigue_indices[i]), 4),
                 "engagement_idx": round(float(engagement_indices[i]), 4),
                 "oc_score": round(float(oc_scores[i]), 4),
@@ -156,7 +165,7 @@ def compute_oc_scores(eeg_csv_path, output_path=None):
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w", newline="") as f:
             writer = csv.DictWriter(
-                f, fieldnames=["sec", "fatigue_idx", "engagement_idx", "oc_score"]
+                f, fieldnames=["sec", "timestamp", "fatigue_idx", "engagement_idx", "oc_score"]
             )
             writer.writeheader()
             writer.writerows(results)

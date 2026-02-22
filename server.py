@@ -164,17 +164,29 @@ async def find_notify_characteristic(client: BleakClient) -> Optional[str]:
         print(f"→ Auto-selecting characteristic: {notify_chars[0]}\n")
         return notify_chars[0]
 
+    # Filter out standard BLE service characteristics (battery, device info, etc.)
+    # Standard 16-bit UUIDs follow pattern: 0000xxxx-0000-1000-8000-00805f9b34fb
+    STANDARD_BLE_SUFFIX = "-0000-1000-8000-00805f9b34fb"
+    custom_chars = [uuid for uuid in notify_chars if not uuid.lower().endswith(STANDARD_BLE_SUFFIX)]
+
+    if len(custom_chars) == 1:
+        print(f"→ Auto-selecting EEG characteristic: {custom_chars[0]}")
+        print(f"  (skipped {len(notify_chars) - 1} standard BLE characteristic(s))\n")
+        return custom_chars[0]
+
+    # Fall back to manual selection
+    select_from = custom_chars if custom_chars else notify_chars
     print("Found multiple notifiable characteristics:\n")
-    for i, uuid in enumerate(notify_chars, 1):
+    for i, uuid in enumerate(select_from, 1):
         print(f"  [{i}] {uuid}")
     print()
 
     while True:
         try:
-            choice = input(f"Select characteristic [1-{len(notify_chars)}]: ")
+            choice = input(f"Select characteristic [1-{len(select_from)}]: ")
             idx = int(choice) - 1
-            if 0 <= idx < len(notify_chars):
-                return notify_chars[idx]
+            if 0 <= idx < len(select_from):
+                return select_from[idx]
         except (ValueError, KeyboardInterrupt):
             print("❌ Invalid selection")
             return None
