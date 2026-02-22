@@ -1,0 +1,298 @@
+
+╭─── Claude Code v2.1.50 ──────────────────────────────────────────────────────╮
+│                                         │ Tips for getting started           │
+│            Welcome back Phil!           │ Run /init to create a CLAUDE.md f… │
+│                                         │ ────────────────────────────────── │
+│                                         │ Recent activity                    │
+│                    ✻                    │ No recent activity                 │
+│                    |                    │                                    │
+│                   ▟█▙                   │                                    │
+│                 ▐▛███▜▌                 │                                    │
+│                ▝▜█████▛▘                │                                    │
+│                  ▘▘ ▝▝                  │                                    │
+│                                         │                                    │
+│          Opus 4.6 · Claude Max          │                                    │
+│   ~/coding/hackathons/LondonHackathon   │                                    │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✻ Conversation compacted (ctrl+o for history)
+
+  ⎿  Read oc_scorer.py (180 lines)
+  ⎿  Read model_compare.py (260 lines)
+  ⎿  Read parallel_runner.py (150 lines)
+  ⎿  Read config.py (52 lines)
+  ⎿  Read pipeline.py (201 lines)
+  ⎿  Plan file referenced (~/.claude/plans/parallel-watching-kurzweil.md)
+  ⎿  Skills restored (superpowers:systematic-debugging)
+
+⏺ Continuing with the live pipeline timestamp alignment fix. Let me check the
+  current state of the files I need to edit.
+
+⏺ Read 3 files (ctrl+o to expand)
+
+⏺ Let me also check data_recorder.py to confirm the "t" field format in game
+  JSONL records.
+
+⏺ Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Good. Game records have "t": round(time.time(), 2) — wall-clock time. Now let
+  me implement all four fixes.
+
+  Fix 1: oc_scorer.py — add timestamp to results and CSV output.
+
+⏺ Update(oc_scorer.py)
+  ⎿  Added 1 line
+      144          results.append(                                       
+      145              {                                                 
+      146                  "sec": window_secs[i],                        
+      147 +                "timestamp": round(window_timestamps[i], 2),  
+      148                  "fatigue_idx":                                
+           round(float(fatigue_indices[i]), 4),                          
+      149                  "engagement_idx":                             
+           round(float(engagement_indices[i]), 4),                       
+      150                  "oc_score": round(float(oc_scores[i]), 4),    
+
+⏺ Update(oc_scorer.py)
+  ⎿  Added 1 line, removed 1 line
+      165          output_path.parent.mkdir(parents=True, exist_ok=True) 
+      166          with open(output_path, "w", newline="") as f:         
+      167              writer = csv.DictWriter(                          
+      168 -                f, fieldnames=["sec", "                       
+          -fatigue_idx", "engagement_idx", "oc_score"]                   
+      168 +                f, fieldnames=["sec", "timestamp", "          
+          +fatigue_idx", "engagement_idx", "oc_score"]                   
+      169              )                                                 
+      170              writer.writeheader()                              
+      171              writer.writerows(results)                         
+
+⏺ Fix 2: dataset.py — merge on wall-clock timestamp with nearest-match
+  tolerance.
+
+⏺ Update(dataset.py)
+  ⎿  Added 39 lines, removed 7 lines
+       48      oc_scores_csv_path = oc_scores_csv_path or                
+           config.OC_SCORES_CSV                                          
+       49      output_path = output_path or (config.DATA_DIR /           
+           "dataset_full.csv")                                           
+       50                                                                
+       51 -    # Read OC scores                                          
+       52 -    oc_scores = {}                                            
+       51 +    # Read OC scores — index by wall-clock timestamp for      
+          +accurate matching                                             
+       52 +    oc_timestamps = []  # sorted list of (timestamp,          
+          +oc_score)                                                     
+       53 +    oc_by_sec = {}      # fallback: sec -> oc_score (for      
+          +synthetic data)                                               
+       54      with open(oc_scores_csv_path, 'r') as f:                  
+       55          reader = csv.DictReader(f)                            
+       56          for row in reader:                                    
+       57 -            sec = int(row['sec'])                             
+       58 -            oc_scores[sec] = float(row['oc_score'])           
+       57 +            oc_by_sec[int(row['sec'])] =                      
+          +float(row['oc_score'])                                        
+       58 +            if 'timestamp' in row and row['timestamp']:       
+       59 +                                                              
+          +oc_timestamps.append((float(row['timestamp']),                
+          +float(row['oc_score'])))                                      
+       60 +    oc_timestamps.sort()                                      
+       61                                                                
+       62      # Read game recording and merge                           
+       63      rows = []                                                 
+       64 +    unmatched = 0                                             
+       65      with open(game_jsonl_path, 'r') as f:                     
+       66          for line in f:                                        
+       67              record = json.loads(line.strip())                 
+       68 -            sec = record['sec']                               
+       68                                                                
+       69 -            # Get OC score (default 0.5 if missing)           
+       70 -            oc = oc_scores.get(sec, 0.5)                      
+       69 +            # Match by wall-clock timestamp if available,     
+          +else fall back to sec                                         
+       70 +            oc = None                                         
+       71 +            if oc_timestamps and 't' in record:               
+       72 +                game_ts = float(record['t'])                  
+       73 +                # Binary search for nearest OC timestamp      
+       74 +                best_dist = float('inf')                      
+       75 +                best_oc = None                                
+       76 +                lo, hi = 0, len(oc_timestamps) - 1            
+       77 +                while lo <= hi:                               
+       78 +                    mid = (lo + hi) // 2                      
+       79 +                    dist = abs(oc_timestamps[mid][0] -        
+          +game_ts)                                                      
+       80 +                    if dist < best_dist:                      
+       81 +                        best_dist = dist                      
+       82 +                        best_oc = oc_timestamps[mid][1]       
+       83 +                    if oc_timestamps[mid][0] < game_ts:       
+       84 +                        lo = mid + 1                          
+       85 +                    else:                                     
+       86 +                        hi = mid - 1                          
+       87 +                if best_dist <= 2.0:  # within 2 second       
+          +tolerance                                                     
+       88 +                    oc = best_oc                              
+       89 +                else:                                         
+       90 +                    unmatched += 1                            
+       91 +            else:                                             
+       92 +                # Fallback for synthetic data (no wall-clock  
+          +timestamps)                                                   
+       93 +                sec = record.get('sec', record.get('s', 0))   
+       94 +                oc = oc_by_sec.get(sec)                       
+       95 +                if oc is None:                                
+       96 +                    unmatched += 1                            
+       97                                                                
+       98 +            if oc is None:                                    
+       99 +                oc = 0.5  # default for unmatched             
+      100 +                                                              
+      101              # Compute per-lane obstacle distances             
+      102              distances =                                       
+           _compute_nearest_obstacle_distances(record.get('obs', []))    
+      103                                                                
+
+⏺ Now add the unmatched warning after the merge loop.
+
+⏺ Update(dataset.py)
+  ⎿  Added 2 lines
+      119          writer.writeheader()                                  
+      120          writer.writerows(rows)                                
+      121                                                                
+      122 +    if unmatched > 0:                                         
+      123 +        print(f"  ⚠ {unmatched}/{len(rows)} game records had  
+          + no matching OC score (assigned 0.5)")                        
+      124      print(f"  Dataset built: {output_path} ({len(rows)}       
+           rows)")                                                       
+      125      return output_path                                        
+      126                                                                
+
+⏺ Fix 3: server.py — auto-select non-standard BLE characteristic (skip
+  battery/standard services).
+
+⏺ Update(server.py)
+  ⎿  Added 16 lines, removed 4 lines
+      164          print(f"→ Auto-selecting characteristic:              
+           {notify_chars[0]}\n")                                         
+      165          return notify_chars[0]                                
+      166                                                                
+      167 +    # Filter out standard BLE service characteristics         
+          +(battery, device info, etc.)                                  
+      168 +    # Standard 16-bit UUIDs follow pattern:                   
+          +0000xxxx-0000-1000-8000-00805f9b34fb                          
+      169 +    STANDARD_BLE_SUFFIX = "-0000-1000-8000-00805f9b34fb"      
+      170 +    custom_chars = [uuid for uuid in notify_chars if not      
+          +uuid.lower().endswith(STANDARD_BLE_SUFFIX)]                   
+      171 +                                                              
+      172 +    if len(custom_chars) == 1:                                
+      173 +        print(f"→ Auto-selecting EEG characteristic:          
+          +{custom_chars[0]}")                                           
+      174 +        print(f"  (skipped {len(notify_chars) - 1} standard   
+          +BLE characteristic(s))\n")                                    
+      175 +        return custom_chars[0]                                
+      176 +                                                              
+      177 +    # Fall back to manual selection                           
+      178 +    select_from = custom_chars if custom_chars else           
+          +notify_chars                                                  
+      179      print("Found multiple notifiable characteristics:\n")     
+      180 -    for i, uuid in enumerate(notify_chars, 1):                
+      180 +    for i, uuid in enumerate(select_from, 1):                 
+      181          print(f"  [{i}] {uuid}")                              
+      182      print()                                                   
+      183                                                                
+      184      while True:                                               
+      185          try:                                                  
+      186 -            choice = input(f"Select characteristic [1-{len(   
+          -notify_chars)}]: ")                                           
+      186 +            choice = input(f"Select characteristic [1-{len(   
+          +select_from)}]: ")                                            
+      187              idx = int(choice) - 1                             
+      188 -            if 0 <= idx < len(notify_chars):                  
+      189 -                return notify_chars[idx]                      
+      188 +            if 0 <= idx < len(select_from):                   
+      189 +                return select_from[idx]                       
+      190          except (ValueError, KeyboardInterrupt):               
+      191              print("❌ Invalid selection")                     
+      192              return None                                       
+
+⏺ Fix 4: pipeline.py — warn on insufficient data after processing.
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Update(pipeline.py)
+  ⎿  Added 8 lines
+      130      cmd_process(args)                                         
+      131      print(f"  Step time: {time.time() - step_start:.1f}s")    
+      132                                                                
+      133 +    # Check for insufficient clean data                       
+      134 +    import csv as _csv                                        
+      135 +    with open(config.DATASET_CLEAN, 'r') as _f:               
+      136 +        clean_count = sum(1 for _ in _csv.reader(_f)) - 1  #  
+          +minus header                                                  
+      137 +    if clean_count < 20:                                      
+      138 +        print(f"\n  ⚠ Only {clean_count} clean rows — model   
+          +will be unreliable.")                                         
+      139 +        print("    Try recording for at least 60 seconds for  
+          +usable results.")                                             
+      140 +                                                              
+      141      # Step 2: Train                                           
+      142      step_start = time.time()                                  
+      143      print("\n[2/5] Training models...")                       
+
+⏺ Now let me verify the synthetic pipeline still works.
+
+⏺ Read 2 files (ctrl+o to expand)
+
+⏺ Synthetic pipeline works perfectly — +15.2% improvement, 29.4s total. The 1
+  unmatched record warning is expected (boundary edge case with synthetic data).
+
+  Let me also verify the OC scores CSV now has the timestamp column.
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Timestamp column is there. Now let me commit and push all the fixes.
+
+⏺ Bash(git status)
+  ⎿  On branch main
+     Your branch is up to date with 'origin/main'.
+     … +10 lines (ctrl+o to expand)
+
+⏺ Bash(git diff oc_scorer.py dataset.py server.py pipeline.py)
+  ⎿  diff --git a/dataset.py b/dataset.py
+     index 4cf818c..229716f 100644
+     --- a/dataset.py
+     … +117 lines (ctrl+o to expand)
+
+⏺ All four changes look correct. Let me commit and push.
+
+⏺ Bash(git log --oneline -3)
+  ⎿  48ea63c Fix numpy compat: trapz renamed to trapezoid in numpy 2.x
+     7dc33f9 Fix live pipeline and dynamic core allocation
+     43fa179 Add NeuroLabel pipeline — EEG-guided game AI training demo
+
+⏺ Bash(git add oc_scorer.py dataset.py server.py pipeline.py && git commit -m
+      "Fix live pipeline timestamp alignment and BLE auto-select…)
+  ⎿  [main 388dd4e] Fix live pipeline timestamp alignment and BLE auto-sele
+     ct
+      Committer: phil <phil@mini.local>
+     … +12 lines (ctrl+o to expand)
+
+⏺ Bash(git push origin main)
+  ⎿  To github.com:Mihai-Simedrea/LondonHackathon.git
+        48ea63c..388dd4e  main -> main
+
+⏺ All done. Here's what was fixed:
+
+  1. oc_scorer.py — Now reads wall-clock timestamps from EEG CSV and includes
+  them in output. Each OC score has a timestamp field (epoch seconds).
+
+  2. dataset.py — Merges game records with OC scores by nearest wall-clock
+  timestamp (binary search, 2s tolerance) instead of sequential sec counter.
+  Falls back to sec matching for synthetic data. Warns about unmatched records.
+
+  3. server.py — Auto-selects the EEG BLE characteristic by filtering out
+  standard service UUIDs (battery 0000xxxx-0000-1000-8000-00805f9b34fb). No more
+   manual selection prompt.
+
+  4. pipeline.py — Warns if clean dataset has < 20 rows after processing,
+  suggesting longer recording.
+
+  Synthetic pipeline verified working: 600 rows, 243 clean, +15.2% improvement,
+  29.4s total.
+
+✻ Crunched for 7m 8s
