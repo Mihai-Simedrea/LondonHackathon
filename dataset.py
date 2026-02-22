@@ -4,10 +4,12 @@
 import json
 import csv
 from bisect import bisect_left
-import numpy as np
 from pathlib import Path
 import config
 from game_engine import LANE_COUNT, HEIGHT
+
+
+VELOCITY_FIELDNAMES = ["lane", "obs_d0", "obs_d1", "obs_d2", "decision", "oc_score"]
 
 
 def _compute_nearest_obstacle_distances(obstacles_list):
@@ -36,11 +38,77 @@ def _compute_nearest_obstacle_distances(obstacles_list):
     return distances
 
 
+def _match_oc_score(record, oc_ts_keys, oc_ts_values, oc_by_sec):
+    """Match a game record to its OC score by timestamp or sec field."""
+    oc = None
+    matched = True
+    if oc_ts_keys and 't' in record:
+        game_ts = float(record['t'])
+        idx = bisect_left(oc_ts_keys, game_ts)
+        best_dist = float('inf')
+        for candidate in (idx - 1, idx):
+            if 0 <= candidate < len(oc_ts_keys):
+                d = abs(oc_ts_keys[candidate] - game_ts)
+                if d < best_dist:
+                    best_dist = d
+                    oc = oc_ts_values[candidate]
+        if best_dist > 2.5:
+            oc = None
+            matched = False
+    else:
+        sec = record.get('sec', record.get('s', 0))
+        oc = oc_by_sec.get(sec)
+        if oc is None:
+            matched = False
+
+    if oc is None:
+        oc = 0.5
+    return oc, matched
+
+
+def _load_oc_lookup(oc_scores_csv_path):
+    """Load OC scores indexed by both integer second and timestamp."""
+    oc_ts_pairs = []
+    oc_by_sec = {}
+    with open(oc_scores_csv_path, "r") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            oc_score = float(row["oc_score"])
+            oc_by_sec[int(row["sec"])] = oc_score
+            if row.get("timestamp"):
+                oc_ts_pairs.append((float(row["timestamp"]), oc_score))
+
+    oc_ts_pairs.sort(key=lambda p: p[0])
+    oc_ts_keys = [ts for ts, _ in oc_ts_pairs]
+    oc_ts_values = [score for _, score in oc_ts_pairs]
+    return oc_ts_keys, oc_ts_values, oc_by_sec
+
+
+def _detect_game_format(game_jsonl_path):
+    """Return True if the recording is in MetaDrive format."""
+    with open(game_jsonl_path, "r") as f:
+        first_line = f.readline().strip()
+    if not first_line:
+        raise ValueError(f"Empty game recording file: {game_jsonl_path}")
+    first = json.loads(first_line)
+    return "features" in first
+
+
+def _write_csv_rows(path, fieldnames, rows):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    return path
+
+
 def build_dataset(game_jsonl_path=None, oc_scores_csv_path=None, output_path=None):
     """
-    Merge game recording JSONL with OC scores CSV by matching 'sec' field.
+    Merge game recording JSONL with OC scores CSV.
 
-    Output CSV columns: lane, obs_d0, obs_d1, obs_d2, decision, oc_score
+    Supports both Velocity (lane/obs/decision) and MetaDrive (features/action) formats.
 
     Returns: path to full dataset CSV
     """
@@ -49,79 +117,58 @@ def build_dataset(game_jsonl_path=None, oc_scores_csv_path=None, output_path=Non
     output_path = output_path or (config.DATA_DIR / "dataset_full.csv")
 
     # Read OC scores — index by wall-clock timestamp for accurate matching
-    oc_ts_keys = []    # sorted timestamp list for bisect
-    oc_ts_values = []  # corresponding oc_scores
-    oc_by_sec = {}     # fallback: sec -> oc_score (for data without timestamps)
-    with open(oc_scores_csv_path, 'r') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            oc_by_sec[int(row['sec'])] = float(row['oc_score'])
-            if 'timestamp' in row and row['timestamp']:
-                oc_ts_keys.append(float(row['timestamp']))
-                oc_ts_values.append(float(row['oc_score']))
+    oc_ts_keys, oc_ts_values, oc_by_sec = _load_oc_lookup(oc_scores_csv_path)
 
-    # Read game recording and merge
+    # Detect format from first JSONL record
+    is_metadrive = _detect_game_format(game_jsonl_path)
+
     rows = []
     unmatched = 0
+    skipped = 0
     with open(game_jsonl_path, 'r') as f:
         for line in f:
-            record = json.loads(line.strip())
+            try:
+                record = json.loads(line.strip())
+            except json.JSONDecodeError:
+                skipped += 1
+                continue
+            oc, matched = _match_oc_score(record, oc_ts_keys, oc_ts_values, oc_by_sec)
+            if not matched:
+                unmatched += 1
 
-            # Match by wall-clock timestamp if available, else fall back to sec
-            oc = None
-            if oc_ts_keys and 't' in record:
-                game_ts = float(record['t'])
-                # bisect for true nearest neighbor
-                idx = bisect_left(oc_ts_keys, game_ts)
-                best_dist = float('inf')
-                # Check the two candidates adjacent to the insertion point
-                for candidate in (idx - 1, idx):
-                    if 0 <= candidate < len(oc_ts_keys):
-                        d = abs(oc_ts_keys[candidate] - game_ts)
-                        if d < best_dist:
-                            best_dist = d
-                            oc = oc_ts_values[candidate]
-                if best_dist > 2.5:
-                    oc = None
-                    unmatched += 1
+            if is_metadrive:
+                row = dict(record["features"])
+                row["action"] = record["action"]
+                row["oc_score"] = round(oc, 4)
             else:
-                # Fallback for data without wall-clock timestamps
-                sec = record.get('sec', record.get('s', 0))
-                oc = oc_by_sec.get(sec)
-                if oc is None:
-                    unmatched += 1
+                distances = _compute_nearest_obstacle_distances(record.get('obs', []))
+                row = {
+                    'lane': record['lane'],
+                    'obs_d0': round(distances[0], 4),
+                    'obs_d1': round(distances[1], 4),
+                    'obs_d2': round(distances[2], 4),
+                    'decision': record['decision'],
+                    'oc_score': round(oc, 4),
+                }
+            rows.append(row)
 
-            if oc is None:
-                oc = 0.5  # default for unmatched
+    if is_metadrive:
+        from metadrive_wrapper import FEATURE_NAMES
+        fieldnames = FEATURE_NAMES + ["action", "oc_score"]
+    else:
+        fieldnames = VELOCITY_FIELDNAMES
 
-            # Compute per-lane obstacle distances
-            distances = _compute_nearest_obstacle_distances(record.get('obs', []))
+    output_path = _write_csv_rows(output_path, fieldnames, rows)
 
-            rows.append({
-                'lane': record['lane'],
-                'obs_d0': round(distances[0], 4),
-                'obs_d1': round(distances[1], 4),
-                'obs_d2': round(distances[2], 4),
-                'decision': record['decision'],
-                'oc_score': round(oc, 4)
-            })
-
-    # Write dataset
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(output_path, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=['lane', 'obs_d0', 'obs_d1', 'obs_d2', 'decision', 'oc_score'])
-        writer.writeheader()
-        writer.writerows(rows)
-
+    if skipped > 0:
+        print(f"  ⚠ Skipped {skipped} corrupted JSONL lines")
     if unmatched > 0:
         print(f"  ⚠ {unmatched}/{len(rows)} game records had no matching OC score (assigned 0.5)")
     print(f"  Dataset built: {output_path} ({len(rows)} rows)")
     return output_path
 
 
-def filter_dataset(dataset_path=None, clean_path=None, cutoff=None, oc_cutoff=None):
+def filter_dataset(dataset_path=None, clean_path=None, cutoff=None, oc_cutoff=None, dirty_path=None):
     """
     Split dataset into dirty (all data) and clean (OC >= cutoff).
 
@@ -133,29 +180,22 @@ def filter_dataset(dataset_path=None, clean_path=None, cutoff=None, oc_cutoff=No
         cutoff = oc_cutoff
     cutoff = cutoff if cutoff is not None else config.OC_CUTOFF
 
-    # Read full dataset
-    rows = []
+    # Read full dataset (rows + fieldnames in one pass)
     with open(dataset_path, 'r') as f:
         reader = csv.DictReader(f)
-        for row in reader:
-            rows.append(row)
+        fieldnames = list(reader.fieldnames or [])
+        rows = list(reader)
 
     # Split
     clean_rows = [r for r in rows if float(r['oc_score']) >= cutoff]
 
     # Write dirty (all data)
-    dirty_path = config.DATASET_DIRTY
-    with open(dirty_path, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=['lane', 'obs_d0', 'obs_d1', 'obs_d2', 'decision', 'oc_score'])
-        writer.writeheader()
-        writer.writerows(rows)
+    dirty_path = Path(dirty_path) if dirty_path is not None else config.DATASET_DIRTY
+    dirty_path = _write_csv_rows(dirty_path, fieldnames, rows)
 
     # Write clean (filtered)
     clean_path = Path(clean_path) if clean_path is not None else config.DATASET_CLEAN
-    with open(clean_path, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=['lane', 'obs_d0', 'obs_d1', 'obs_d2', 'decision', 'oc_score'])
-        writer.writeheader()
-        writer.writerows(clean_rows)
+    clean_path = _write_csv_rows(clean_path, fieldnames, clean_rows)
 
     pct_kept = len(clean_rows) / len(rows) * 100 if rows else 0
     pct_filtered = 100 - pct_kept

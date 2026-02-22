@@ -27,6 +27,10 @@ DEFAULT_FNIRS_SAMPLE_RATE = 11
 WINDOW_SEC = 4
 STRIDE_SEC = 1
 
+# Backward-compatible constants used by tests / older scripts.
+SAMPLE_RATE = DEFAULT_SAMPLE_RATE
+WINDOW_SAMPLES = SAMPLE_RATE * WINDOW_SEC
+
 # Indices into the 20-channel array (0-based, before timestamp offset)
 # Fp1=0, Fp2=1, Fpz=2, Fz=9
 FRONTAL_CHANNELS = [0, 1, 2, 9]
@@ -43,7 +47,7 @@ FNIRS_BASELINE_SEC = 30
 EPSILON = 1e-10
 
 
-def compute_oc_scores(csv_path, output_path=None, trim_before=None):
+def compute_oc_scores(csv_path, output_path=None, trim_before=None, include_timestamp_in_csv=False):
     """
     Auto-detect EEG vs fNIRS CSV and compute OC scores.
 
@@ -55,6 +59,8 @@ def compute_oc_scores(csv_path, output_path=None, trim_before=None):
         output_path: Optional path to save OC scores CSV
         trim_before: Optional wall-clock timestamp — discard samples before
                      this time (e.g. game start)
+        include_timestamp_in_csv: If True, include wall-clock timestamp column in
+                                  saved CSV output for precise matching.
 
     Returns:
         List of dicts with sec, timestamp, fatigue_idx, engagement_idx,
@@ -66,12 +72,14 @@ def compute_oc_scores(csv_path, output_path=None, trim_before=None):
 
     if "ir_l" in first_line:
         return compute_oc_scores_fnirs(csv_path, output_path=output_path,
-                                       trim_before=trim_before)
+                                       trim_before=trim_before,
+                                       include_timestamp_in_csv=include_timestamp_in_csv)
     return compute_oc_scores_eeg(csv_path, output_path=output_path,
-                                 trim_before=trim_before)
+                                 trim_before=trim_before,
+                                 include_timestamp_in_csv=include_timestamp_in_csv)
 
 
-def compute_oc_scores_eeg(eeg_csv_path, output_path=None, trim_before=None):
+def compute_oc_scores_eeg(eeg_csv_path, output_path=None, trim_before=None, include_timestamp_in_csv=False):
     """
     Compute OC scores from raw EEG CSV.
 
@@ -229,12 +237,24 @@ def compute_oc_scores_eeg(eeg_csv_path, output_path=None, trim_before=None):
     if output_path is not None:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        fieldnames = ["sec", "fatigue_idx", "engagement_idx", "oc_score"]
+        if include_timestamp_in_csv:
+            fieldnames.insert(1, "timestamp")
         with open(output_path, "w", newline="") as f:
-            writer = csv.DictWriter(
-                f, fieldnames=["sec", "timestamp", "fatigue_idx", "engagement_idx", "oc_score"]
-            )
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(results)
+            for row in results:
+                if include_timestamp_in_csv:
+                    writer.writerow({name: row[name] for name in fieldnames})
+                else:
+                    writer.writerow(
+                        {
+                            "sec": row["sec"],
+                            "fatigue_idx": row["fatigue_idx"],
+                            "engagement_idx": row["engagement_idx"],
+                            "oc_score": row["oc_score"],
+                        }
+                    )
 
     return results
 
@@ -243,7 +263,7 @@ def compute_oc_scores_eeg(eeg_csv_path, output_path=None, trim_before=None):
 # fNIRS OC scoring
 # ---------------------------------------------------------------------------
 
-def compute_oc_scores_fnirs(fnirs_csv_path, output_path=None, trim_before=None):
+def compute_oc_scores_fnirs(fnirs_csv_path, output_path=None, trim_before=None, include_timestamp_in_csv=False):
     """
     Compute OC scores from raw fNIRS CSV (Mendi headband).
 
@@ -420,13 +440,24 @@ def compute_oc_scores_fnirs(fnirs_csv_path, output_path=None, trim_before=None):
     if output_path is not None:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        fieldnames = ["sec", "fatigue_idx", "engagement_idx", "oc_score"]
+        if include_timestamp_in_csv:
+            fieldnames.insert(1, "timestamp")
         with open(output_path, "w", newline="") as f:
-            writer = csv.DictWriter(
-                f, fieldnames=["sec", "timestamp", "fatigue_idx",
-                               "engagement_idx", "oc_score"],
-            )
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(results)
+            for row in results:
+                if include_timestamp_in_csv:
+                    writer.writerow({name: row[name] for name in fieldnames})
+                else:
+                    writer.writerow(
+                        {
+                            "sec": row["sec"],
+                            "fatigue_idx": row["fatigue_idx"],
+                            "engagement_idx": row["engagement_idx"],
+                            "oc_score": row["oc_score"],
+                        }
+                    )
 
     return results
 

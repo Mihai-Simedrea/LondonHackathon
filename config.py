@@ -1,5 +1,8 @@
 """Shared configuration for NeuroLabel pipeline."""
 from pathlib import Path
+import multiprocessing as _mp
+
+from game_engine import HEIGHT, WIDTH, FPS, LANE_COUNT, ROAD_SPEED, SPAWN_INTERVAL
 
 # Directories
 PROJECT_DIR = Path(__file__).parent
@@ -13,6 +16,9 @@ for d in [DATA_DIR, MODELS_DIR, RESULTS_DIR]:
 
 # ── Device mode: "fnirs" or "eeg" ──
 DEVICE_MODE = "fnirs"
+
+# ── Game backend: "velocity" or "metadrive" ──
+GAME_BACKEND = "metadrive"
 
 # EEG settings
 SAMPLE_RATE = 250
@@ -36,18 +42,19 @@ BASELINE_SECONDS = 120
 WINDOW_SECONDS = 4
 STRIDE_SECONDS = 1
 
-# Game settings (matching car_game.py)
-LANE_COUNT = 3
-FPS = 60
-HEIGHT = 720
-WIDTH = 480
-ROAD_SPEED = 7.0
-SPAWN_INTERVAL = 55
+# Game settings come from the canonical headless engine constants to avoid drift.
+
+# MetaDrive settings
+METADRIVE_MAP = 7
+METADRIVE_TRAFFIC_DENSITY = 0.5
+METADRIVE_NUM_SCENARIOS = 100
+METADRIVE_HORIZON = 1000
+METADRIVE_STEERING_DIM = 5
+METADRIVE_THROTTLE_DIM = 3
 
 # Simulation settings
-import multiprocessing as _mp
-SIMS_PER_MODEL = 50
-SIM_WORKERS = max(2, _mp.cpu_count() - 4)
+SIMS_PER_MODEL = 20
+SIM_WORKERS = max(2, _mp.cpu_count() - 2)
 BATCH_SIZE = 10
 
 # File paths
