@@ -10,6 +10,7 @@ import struct
 import csv
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -50,6 +51,7 @@ GAME_SCRIPT = Path(__file__).parent / "car_game.py"
 all_data = []
 packet_count = 0
 start_time = None
+FIXED_FILENAME = None
 
 # -------------------------------------------------------------------------
 # Utility Functions
@@ -199,7 +201,7 @@ async def ble_callback(sender, data: bytearray):
         return
 
     voltages = [adc_to_microvolts(ch) for ch in channels]
-    all_data.append(voltages)
+    all_data.append([time.time()] + voltages)
     packet_count += 1
 
     if packet_count % 250 == 0:
@@ -216,13 +218,15 @@ def save_to_csv():
         print("❌ No data to save")
         return
 
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    filename = f"eeg-recording-{timestamp}.csv"
-    filepath = SAVE_FOLDER / filename
+    if FIXED_FILENAME:
+        filepath = SAVE_FOLDER / FIXED_FILENAME
+    else:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filepath = SAVE_FOLDER / f"eeg-recording-{timestamp}.csv"
 
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow(CHANNEL_NAMES)
+        writer.writerow(["timestamp"] + CHANNEL_NAMES)
         for sample in all_data:
             writer.writerow(sample)
 
@@ -294,6 +298,17 @@ async def record_eeg():
 # Entry Point
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--record", action="store_true", help="Recording mode for NeuroLabel pipeline")
+    args = parser.parse_args()
+
+    if args.record:
+        SAVE_FOLDER = Path(__file__).parent / "data"
+        SAVE_FOLDER.mkdir(exist_ok=True)
+        FIXED_FILENAME = "eeg_recording.csv"
+        GAME_SCRIPT = Path(__file__).parent / "data_recorder.py"
+
     try:
         asyncio.run(record_eeg())
     except KeyboardInterrupt:
