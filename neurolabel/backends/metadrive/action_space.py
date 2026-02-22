@@ -18,8 +18,8 @@ def throttle_values() -> np.ndarray:
 def noop_action() -> int:
     """Middle steering + middle throttle discrete action."""
     return (
-        (config.METADRIVE_STEERING_DIM // 2) * config.METADRIVE_THROTTLE_DIM
-        + (config.METADRIVE_THROTTLE_DIM // 2)
+        (config.METADRIVE_THROTTLE_DIM // 2) * config.METADRIVE_STEERING_DIM
+        + (config.METADRIVE_STEERING_DIM // 2)
     )
 
 
@@ -29,5 +29,6 @@ def continuous_to_discrete(steer: float, throttle: float) -> int:
     t_vals = throttle_values()
     s_idx = int(np.argmin(np.abs(s_vals - steer)))
     t_idx = int(np.argmin(np.abs(t_vals - throttle)))
-    return s_idx * config.METADRIVE_THROTTLE_DIM + t_idx
+    # MetaDrive decodes: steer = action % steering_dim, throttle = action // steering_dim
+    return t_idx * config.METADRIVE_STEERING_DIM + s_idx
 

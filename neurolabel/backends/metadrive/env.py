@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import numpy as np
 from metadrive import MetaDriveEnv
+from metadrive.policy.idm_policy import IDMPolicy
 import config
+
+# Override NPC driving speeds (defaults: NORMAL_SPEED=30, MAX_SPEED=100 km/h)
+IDMPolicy.NORMAL_SPEED = config.METADRIVE_NPC_SPEED
+IDMPolicy.MAX_SPEED = config.METADRIVE_NPC_MAX_SPEED
 
 # Observation layout for default MetaDrive (259-dim):
 #   [0]  dist_left_boundary (normalized)

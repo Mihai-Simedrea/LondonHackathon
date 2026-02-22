@@ -1,0 +1,188 @@
+:root {
+  --bg: #0a0a0a;
+  --text: #e0e0e0;
+  --accent: #00f0ff;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'JetBrains Mono', monospace;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+#bg-canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  transition: filter 0.8s ease;
+}
+
+#bg-canvas.blurred {
+  filter: blur(12px);
+}
+
+#app {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 2rem;
+  gap: 2rem;
+}
+
+/* Header */
+.header {
+  text-align: center;
+  transition: opacity 0.6s ease;
+}
+
+.header.fade-out {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.header h1 {
+  font-size: 2.4rem;
+  font-weight: 700;
+  letter-spacing: 0.35em;
+  color: var(--accent);
+  margin-bottom: 0.4rem;
+}
+
+.header p {
+  font-size: 0.75rem;
+  font-weight: 300;
+  letter-spacing: 0.15em;
+  opacity: 0.5;
+  text-transform: uppercase;
+}
+
+/* Start button — above everything, shadow only on hover */
+.start-btn {
+  position: relative;
+  z-index: 5;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 0.65rem 2.8rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  background: var(--bg);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 30px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.start-btn:hover {
+  background: var(--accent);
+  color: var(--bg);
+  box-shadow: 0 0 20px rgba(0, 240, 255, 0.3);
+}
+
+/* Game container — centered, offset to account for chain snake */
+.game-container {
+  position: fixed;
+  top: 50%;
+  left: calc(50% - 70px);
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 240, 255, 0.15);
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+
+.game-container.visible {
+  opacity: 1;
+}
+
+.game-container canvas {
+  display: block;
+  max-width: 84vw;
+  max-height: 90vh;
+}
+
+/* Game timer overlay */
+.game-timer {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.1em;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Game loading overlay */
+.game-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 0.1em;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Chain canvas — subtle right-edge progress indicator */
+#chain-canvas {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 140px;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 6;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+}
+
+/* Mobile */
+@media (max-width: 480px) {
+  .header h1 {
+    font-size: 1.5rem;
+    letter-spacing: 0.2em;
+  }
+
+  #chain-canvas {
+    width: 120px;
+  }
+
+  .game-container canvas {
+    max-width: 90vw;
+  }
+}
