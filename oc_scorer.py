@@ -166,5 +166,6 @@ def compute_oc_scores(eeg_csv_path, output_path=None):
 
 def _band_power(freqs, psd, freq_range):
     """Extract power in a frequency band using trapezoidal integration."""
+    _trapz = getattr(np, 'trapezoid', None) or np.trapz
     mask = (freqs >= freq_range[0]) & (freqs <= freq_range[1])
-    return np.trapz(psd[mask], freqs[mask])
+    return _trapz(psd[mask], freqs[mask])
