@@ -3,6 +3,7 @@
 
 import json
 import multiprocessing
+import random
 import time
 from pathlib import Path
 
@@ -45,7 +46,7 @@ def run_simulations(model_path, n_sims=None, batch_size=None):
     batch_size = batch_size or config.BATCH_SIZE
 
     all_runs = []
-    seeds = list(range(n_sims))
+    seeds = random.sample(range(100_000), n_sims)
 
     # Process in batches
     n_batches = (n_sims + batch_size - 1) // batch_size

@@ -1,9 +1,12 @@
 """
 oc_scorer.py — Operator Confidence scorer for NeuroLabel.
 
-Computes OC scores from raw EEG data using frontal-channel PSD analysis.
-Algorithm: sliding-window Welch PSD -> band powers -> fatigue/engagement indices
--> z-score against baseline -> sigmoid fusion -> OC score in [0, 1].
+Computes OC scores from raw EEG or fNIRS data.
+
+EEG mode:  sliding-window Welch PSD -> band powers -> fatigue/engagement indices
+           -> z-score against baseline -> sigmoid fusion -> OC score in [0, 1].
+fNIRS mode: sliding-window MBLL -> dHbO/dHbR -> engagement/fatigue indices
+            -> z-score against baseline -> sigmoid fusion -> OC score in [0, 1].
 """
 
 import csv
@@ -12,11 +15,17 @@ from pathlib import Path
 import numpy as np
 from scipy.signal import welch
 
-SAMPLE_RATE = 250
+from mendi.signal_processor import (
+    EPSILON_MATRIX,
+    PATH_LENGTH,
+    intensity_to_od,
+    od_to_concentrations,
+)
+
+DEFAULT_SAMPLE_RATE = 250
+DEFAULT_FNIRS_SAMPLE_RATE = 11
 WINDOW_SEC = 4
 STRIDE_SEC = 1
-WINDOW_SAMPLES = SAMPLE_RATE * WINDOW_SEC  # 1000
-STRIDE_SAMPLES = SAMPLE_RATE * STRIDE_SEC  # 250
 
 # Indices into the 20-channel array (0-based, before timestamp offset)
 # Fp1=0, Fp2=1, Fpz=2, Fz=9
@@ -29,16 +38,48 @@ BETA_RANGE = (13, 30)
 BASELINE_SEC = 120
 MIN_BASELINE_SEC = 10
 
+FNIRS_BASELINE_SEC = 30
+
 EPSILON = 1e-10
 
 
-def compute_oc_scores(eeg_csv_path, output_path=None):
+def compute_oc_scores(csv_path, output_path=None, trim_before=None):
+    """
+    Auto-detect EEG vs fNIRS CSV and compute OC scores.
+
+    Inspects the CSV header: if it contains 'ir_l' it is treated as fNIRS
+    data, otherwise as EEG data.
+
+    Args:
+        csv_path: Path to EEG or fNIRS CSV
+        output_path: Optional path to save OC scores CSV
+        trim_before: Optional wall-clock timestamp — discard samples before
+                     this time (e.g. game start)
+
+    Returns:
+        List of dicts with sec, timestamp, fatigue_idx, engagement_idx,
+        oc_score.
+    """
+    csv_path = Path(csv_path)
+    with open(csv_path, "r", newline="") as f:
+        first_line = f.readline().lower()
+
+    if "ir_l" in first_line:
+        return compute_oc_scores_fnirs(csv_path, output_path=output_path,
+                                       trim_before=trim_before)
+    return compute_oc_scores_eeg(csv_path, output_path=output_path,
+                                 trim_before=trim_before)
+
+
+def compute_oc_scores_eeg(eeg_csv_path, output_path=None, trim_before=None):
     """
     Compute OC scores from raw EEG CSV.
 
     Args:
         eeg_csv_path: Path to EEG CSV (timestamp + 20 channels)
         output_path: Optional path to save OC scores CSV
+        trim_before: Optional wall-clock timestamp — discard all EEG samples
+                     before this time (e.g. game start time, to skip idle periods)
 
     Returns:
         List of dicts: [{"sec": int, "fatigue_idx": float,
@@ -54,7 +95,10 @@ def compute_oc_scores(eeg_csv_path, output_path=None):
         header = next(reader, None)  # skip header
         for row in reader:
             # columns: timestamp, ch0, ch1, ..., ch19
-            timestamps.append(float(row[0]))
+            ts = float(row[0])
+            if trim_before is not None and ts < trim_before:
+                continue
+            timestamps.append(ts)
             frontal = [float(row[ch + 1]) for ch in FRONTAL_CHANNELS]
             rows.append(frontal)
 
@@ -62,8 +106,28 @@ def compute_oc_scores(eeg_csv_path, output_path=None):
     data = np.array(rows, dtype=np.float64)  # shape (n_samples, 4)
     n_samples = data.shape[0]
 
-    # Need at least one full window (4 seconds)
-    if n_samples < WINDOW_SAMPLES:
+    if trim_before is not None:
+        trimmed = n_samples
+        print(f"  Trimmed EEG to game start: {n_samples} samples kept")
+
+    # --- Auto-detect sample rate from timestamps ---
+    if n_samples > 1:
+        total_duration = timestamps[-1] - timestamps[0]
+        sample_rate = (n_samples - 1) / total_duration if total_duration > 0 else DEFAULT_SAMPLE_RATE
+        # Round to nearest plausible rate
+        sample_rate = round(sample_rate)
+    else:
+        sample_rate = DEFAULT_SAMPLE_RATE
+
+    if sample_rate != DEFAULT_SAMPLE_RATE:
+        print(f"  Auto-detected sample rate: {sample_rate} Hz (config default: {DEFAULT_SAMPLE_RATE})")
+
+    window_samples = sample_rate * WINDOW_SEC
+    stride_samples = sample_rate * STRIDE_SEC
+
+    # Need at least one full window
+    if n_samples < window_samples:
+        print(f"  Not enough samples for one window ({n_samples} < {window_samples})")
         return []
 
     # --- Sliding window: compute per-window band powers ---
@@ -72,19 +136,21 @@ def compute_oc_scores(eeg_csv_path, output_path=None):
     window_secs = []
     window_timestamps = []
 
+    nperseg = min(512, window_samples // 2)  # adapt Welch segment size to window
+
     sec = 0
     start = 0
-    while start + WINDOW_SAMPLES <= n_samples:
-        window = data[start : start + WINDOW_SAMPLES, :]  # (1000, 4)
+    while start + window_samples <= n_samples:
+        window = data[start : start + window_samples, :]
 
         # Wall-clock timestamp at midpoint of this window
-        mid = start + WINDOW_SAMPLES // 2
+        mid = start + window_samples // 2
         window_ts = float(timestamps[min(mid, n_samples - 1)])
 
-        # PSD per frontal channel via Welch
+        # PSD per frontal channel via Welch (use actual sample rate)
         psds = []
         for ch in range(window.shape[1]):
-            freqs, psd = welch(window[:, ch], fs=SAMPLE_RATE, nperseg=512)
+            freqs, psd = welch(window[:, ch], fs=sample_rate, nperseg=nperseg)
             psds.append(psd)
 
         # Average PSD across 4 frontal channels
@@ -104,7 +170,7 @@ def compute_oc_scores(eeg_csv_path, output_path=None):
         window_secs.append(sec)
         window_timestamps.append(window_ts)
 
-        start += STRIDE_SAMPLES
+        start += stride_samples
         sec += STRIDE_SEC
 
     fatigue_indices = np.array(fatigue_indices)
@@ -166,6 +232,198 @@ def compute_oc_scores(eeg_csv_path, output_path=None):
         with open(output_path, "w", newline="") as f:
             writer = csv.DictWriter(
                 f, fieldnames=["sec", "timestamp", "fatigue_idx", "engagement_idx", "oc_score"]
+            )
+            writer.writeheader()
+            writer.writerows(results)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# fNIRS OC scoring
+# ---------------------------------------------------------------------------
+
+def compute_oc_scores_fnirs(fnirs_csv_path, output_path=None, trim_before=None):
+    """
+    Compute OC scores from raw fNIRS CSV (Mendi headband).
+
+    Uses the Modified Beer-Lambert Law (MBLL) to convert raw optical
+    intensities into HbO/HbR concentration changes per sliding window.
+    Prefrontal HbO increase maps to engagement; HbR increase maps to fatigue.
+
+    Args:
+        fnirs_csv_path: Path to fNIRS CSV with columns:
+                        timestamp, ir_l, red_l, amb_l, ir_r, red_r, amb_r,
+                        ir_p, red_p, amb_p, temp
+        output_path: Optional path to save OC scores CSV
+        trim_before: Optional wall-clock timestamp — discard samples before
+                     this time
+
+    Returns:
+        List of dicts: [{"sec": int, "timestamp": float, "fatigue_idx": float,
+                         "engagement_idx": float, "oc_score": float}, ...]
+    """
+    fnirs_csv_path = Path(fnirs_csv_path)
+
+    # --- Read CSV ---
+    timestamps = []
+    ir_l_raw, red_l_raw, amb_l_raw = [], [], []
+    ir_r_raw, red_r_raw, amb_r_raw = [], [], []
+
+    with open(fnirs_csv_path, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            ts = float(row["timestamp"])
+            if trim_before is not None and ts < trim_before:
+                continue
+            timestamps.append(ts)
+            ir_l_raw.append(float(row["ir_l"]))
+            red_l_raw.append(float(row["red_l"]))
+            amb_l_raw.append(float(row["amb_l"]))
+            ir_r_raw.append(float(row["ir_r"]))
+            red_r_raw.append(float(row["red_r"]))
+            amb_r_raw.append(float(row["amb_r"]))
+
+    timestamps = np.array(timestamps)
+    n_samples = len(timestamps)
+
+    if trim_before is not None:
+        print(f"  Trimmed fNIRS to game start: {n_samples} samples kept")
+
+    if n_samples < 2:
+        print("  Not enough fNIRS samples")
+        return []
+
+    # --- Ambient-corrected intensities per channel ---
+    # Each array shape: (n_samples, 2) for [Red, IR]
+    intensity_l = np.column_stack([
+        np.array(red_l_raw) - np.array(amb_l_raw),
+        np.array(ir_l_raw) - np.array(amb_l_raw),
+    ])
+    intensity_r = np.column_stack([
+        np.array(red_r_raw) - np.array(amb_r_raw),
+        np.array(ir_r_raw) - np.array(amb_r_raw),
+    ])
+
+    # --- Auto-detect sample rate from timestamps ---
+    total_duration = timestamps[-1] - timestamps[0]
+    if total_duration > 0:
+        sample_rate = (n_samples - 1) / total_duration
+        sample_rate = round(sample_rate)
+    else:
+        sample_rate = DEFAULT_FNIRS_SAMPLE_RATE
+
+    if sample_rate != DEFAULT_FNIRS_SAMPLE_RATE:
+        print(f"  Auto-detected fNIRS sample rate: {sample_rate} Hz "
+              f"(config default: {DEFAULT_FNIRS_SAMPLE_RATE})")
+
+    window_samples = sample_rate * WINDOW_SEC
+    stride_samples = sample_rate * STRIDE_SEC
+
+    if n_samples < window_samples:
+        print(f"  Not enough fNIRS samples for one window "
+              f"({n_samples} < {window_samples})")
+        return []
+
+    # --- Compute per-channel baseline (first FNIRS_BASELINE_SEC seconds) ---
+    baseline_samples = min(sample_rate * FNIRS_BASELINE_SEC, n_samples)
+    baseline_l = intensity_l[:baseline_samples].mean(axis=0)  # shape (2,)
+    baseline_r = intensity_r[:baseline_samples].mean(axis=0)
+
+    # --- Sliding window: MBLL per window -> dHbO / dHbR ---
+    engagement_indices = []
+    fatigue_indices = []
+    window_secs = []
+    window_timestamps = []
+
+    sec = 0
+    start = 0
+    while start + window_samples <= n_samples:
+        win_l = intensity_l[start : start + window_samples]
+        win_r = intensity_r[start : start + window_samples]
+
+        # Delta optical density for this window (uses mendi helpers)
+        dod_l = intensity_to_od(win_l, baseline_l)   # shape (win, 2)
+        dod_r = intensity_to_od(win_r, baseline_r)
+
+        # MBLL inversion -> [dHbO, dHbR] in uM (uses mendi helper)
+        conc_l = od_to_concentrations(dod_l)  # shape (win, 2)
+        conc_r = od_to_concentrations(dod_r)
+
+        # Average HbO and HbR across left + right channels
+        hbo = (conc_l[:, 0] + conc_r[:, 0]) / 2.0
+        hbr = (conc_l[:, 1] + conc_r[:, 1]) / 2.0
+
+        # Window-level indices: mean concentration change
+        engagement_idx = float(np.mean(hbo))   # prefrontal oxygenation
+        fatigue_idx = float(np.mean(hbr))      # deoxygenation
+
+        engagement_indices.append(engagement_idx)
+        fatigue_indices.append(fatigue_idx)
+
+        # Wall-clock timestamp at midpoint
+        mid = start + window_samples // 2
+        window_timestamps.append(float(timestamps[min(mid, n_samples - 1)]))
+        window_secs.append(sec)
+
+        start += stride_samples
+        sec += STRIDE_SEC
+
+    engagement_indices = np.array(engagement_indices)
+    fatigue_indices = np.array(fatigue_indices)
+    n_windows = len(engagement_indices)
+
+    if n_windows == 0:
+        return []
+
+    # --- Z-score against baseline windows (first FNIRS_BASELINE_SEC) ---
+    baseline_win_count = min(FNIRS_BASELINE_SEC, n_windows)
+    if baseline_win_count < MIN_BASELINE_SEC:
+        baseline_win_count = n_windows
+
+    eng_base = engagement_indices[:baseline_win_count]
+    fat_base = fatigue_indices[:baseline_win_count]
+
+    eng_mean, eng_std = eng_base.mean(), eng_base.std() + EPSILON
+    fat_mean, fat_std = fat_base.mean(), fat_base.std() + EPSILON
+
+    z_engagement = (engagement_indices - eng_mean) / eng_std
+    z_fatigue = (fatigue_indices - fat_mean) / fat_std
+
+    # --- Sigmoid fusion (same formula as EEG) ---
+    raw_oc = 1.0 / (1.0 + np.exp(-(0.6 * z_engagement - 0.4 * z_fatigue + 0.8)))
+    oc_scores = np.clip(raw_oc, 0.0, 1.0)
+
+    # --- Build result list ---
+    results = []
+    for i in range(n_windows):
+        results.append(
+            {
+                "sec": window_secs[i],
+                "timestamp": round(window_timestamps[i], 2),
+                "fatigue_idx": round(float(fatigue_indices[i]), 4),
+                "engagement_idx": round(float(engagement_indices[i]), 4),
+                "oc_score": round(float(oc_scores[i]), 4),
+            }
+        )
+
+    # --- Summary ---
+    if results:
+        scores = [r["oc_score"] for r in results]
+        above_cutoff = sum(1 for s in scores if s >= 0.6)
+        print(f"  OC distribution (fNIRS): min={min(scores):.3f}, "
+              f"max={max(scores):.3f}, mean={sum(scores)/len(scores):.3f}, "
+              f"above 0.6: {above_cutoff}/{len(scores)} "
+              f"({above_cutoff/len(scores)*100:.1f}%)")
+
+    # --- Optionally save to CSV ---
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "w", newline="") as f:
+            writer = csv.DictWriter(
+                f, fieldnames=["sec", "timestamp", "fatigue_idx",
+                               "engagement_idx", "oc_score"],
             )
             writer.writeheader()
             writer.writerows(results)

@@ -17,6 +17,8 @@ import csv
 import joblib
 from pathlib import Path
 
+import config
+
 # Use fork context to avoid macOS spawn re-importing catboost/xgboost in workers
 _mp_ctx = multiprocessing.get_context('fork')
 N_WORKERS = config.SIM_WORKERS
@@ -28,8 +30,6 @@ from sklearn.ensemble import (
 from sklearn.linear_model import LogisticRegression
 from catboost import CatBoostClassifier
 from xgboost import XGBClassifier
-
-import config
 from simulator import simulate
 from model import predict as model_predict, _engineer_features
 

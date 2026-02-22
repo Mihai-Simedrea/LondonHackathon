@@ -20,15 +20,27 @@ def cmd_collect(args):
 
 
 def cmd_process(args):
-    """Process EEG data and build datasets."""
-    print("\n--- PROCESSING ---")
+    """Process brain data (EEG or fNIRS) and build datasets."""
+    print(f"\n--- PROCESSING ({config.DEVICE_MODE.upper()} mode) ---")
 
-    # Step 1: Compute OC scores from EEG
+    # Read game start time so we can trim idle data before gameplay
+    import json as _json
+    trim_before = None
+    if config.GAME_JSONL.exists():
+        with open(config.GAME_JSONL, 'r') as _f:
+            first_line = _f.readline().strip()
+            if first_line:
+                trim_before = _json.loads(first_line).get('t')
+                if trim_before:
+                    print(f"\n  Game start timestamp: {trim_before:.2f}")
+
+    # Step 1: Compute OC scores from brain data
     print("\n[1/3] Computing OC scores...")
     from oc_scorer import compute_oc_scores
     oc_results = compute_oc_scores(
-        str(config.EEG_CSV),
-        output_path=str(config.OC_SCORES_CSV)
+        str(config.BRAIN_CSV),
+        output_path=str(config.OC_SCORES_CSV),
+        trim_before=trim_before,
     )
     print(f"  Computed {len(oc_results)} OC scores")
 

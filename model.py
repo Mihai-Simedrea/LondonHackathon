@@ -86,7 +86,6 @@ def train_model(dataset_csv_path):
         mirror_X.append(_engineer_features(mirror_onehot, obs_d2, obs_d1, obs_d0))
 
         decision = int(row["decision"])
-        # Map original: -1->0, 0->1, 1->2
         action = decision + 1
         # Mirror action: left(0) <-> right(2), stay(1) stays
         if action == 0:
@@ -104,13 +103,14 @@ def train_model(dataset_csv_path):
         n_estimators=500,
         max_depth=10,
         random_state=42,
-        n_jobs=-1,
+        n_jobs=1,
         class_weight="balanced",
     )
     model.fit(X, y)
 
-    accuracy = model.score(X, y)
-    print(f"  Training accuracy: {accuracy:.3f}")
+    from sklearn.model_selection import cross_val_score
+    cv_scores = cross_val_score(model, X, y, cv=min(5, len(X) // 2), scoring='accuracy')
+    print(f"  Cross-val accuracy: {cv_scores.mean():.3f} (+/- {cv_scores.std():.3f})")
     print(f"  Training samples: {len(X)} ({len(X) // 2} original + {len(X) // 2} mirrored)")
     return model
 

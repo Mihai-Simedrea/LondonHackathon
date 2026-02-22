@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Lightweight EEG Recorder
+Lightweight EEG / fNIRS Recorder
 Connects to BLE headset, discovers EEG service automatically, launches the car game,
-and saves data to CSV in microvolts.
+and saves data to CSV in microvolts (EEG) or raw counts (fNIRS).
 """
 
 import asyncio
@@ -15,6 +15,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from bleak import BleakClient, BleakScanner
+
+import config
+from mendi.ble_client import MendiClient
 
 # -------------------------------------------------------------------------
 # Configuration
@@ -36,6 +39,12 @@ MAX_ADC = 2**31
 CHANNEL_NAMES = [
     "Fp1", "Fp2", "Fpz", "Cp1", "-", "-", "T7", "-", "O1", "Fz",
     "O2", "Cp2", "T8", "-", "Oz", "P3", "P4", "P7", "Cz", "P8"
+]
+
+# fNIRS channel names
+FNIRS_CHANNEL_NAMES = [
+    "ir_l", "red_l", "amb_l", "ir_r", "red_r", "amb_r",
+    "ir_p", "red_p", "amb_p", "temp"
 ]
 
 # Save location
@@ -234,19 +243,29 @@ def save_to_csv():
         filepath = SAVE_FOLDER / FIXED_FILENAME
     else:
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        filepath = SAVE_FOLDER / f"eeg-recording-{timestamp}.csv"
+        if config.DEVICE_MODE == "fnirs":
+            filepath = SAVE_FOLDER / f"fnirs-recording-{timestamp}.csv"
+        else:
+            filepath = SAVE_FOLDER / f"eeg-recording-{timestamp}.csv"
+
+    # Choose header based on device mode
+    if config.DEVICE_MODE == "fnirs":
+        header = FNIRS_CHANNEL_NAMES
+    else:
+        header = CHANNEL_NAMES
 
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow(["timestamp"] + CHANNEL_NAMES)
+        writer.writerow(["timestamp"] + header)
         for sample in all_data:
             writer.writerow(sample)
 
     elapsed = (datetime.now() - start_time).total_seconds() if start_time else 0
+    n_channels = len(header)
     print(f"\n✅ Saved: {filepath}")
     print(f"📈 Total samples: {len(all_data):,}")
     print(f"⏱️  Duration: {elapsed:.1f}s")
-    print(f"📊 Channels: {TOTAL_CHANNELS}")
+    print(f"📊 Channels: {n_channels}")
 
 
 # -------------------------------------------------------------------------
@@ -307,6 +326,69 @@ async def record_eeg():
 
 
 # -------------------------------------------------------------------------
+# fNIRS Recording Function
+# -------------------------------------------------------------------------
+async def record_fnirs():
+    """Connect to Mendi fNIRS headband, launch game, and record fNIRS data"""
+    global packet_count, start_time
+
+    print("🔍 Scanning for Mendi fNIRS headband...")
+    print("Make sure your Mendi is powered ON\n")
+
+    try:
+        async with MendiClient() as mendi:
+            print(f"✅ Connected to Mendi")
+            print(f"📁 Save location: {SAVE_FOLDER}\n")
+
+            def fnirs_callback(label: str, pkt):
+                global packet_count, start_time
+                if start_time is None:
+                    start_time = datetime.now()
+
+                all_data.append([
+                    time.time(),
+                    pkt.ir_l, pkt.red_l, pkt.amb_l,
+                    pkt.ir_r, pkt.red_r, pkt.amb_r,
+                    pkt.ir_p, pkt.red_p, pkt.amb_p,
+                    pkt.temp,
+                ])
+                packet_count += 1
+
+                if packet_count % 50 == 0:
+                    elapsed = (datetime.now() - start_time).total_seconds()
+                    print(f"📊 Recording: {packet_count} frames | {elapsed:.1f}s | IR_L: {pkt.ir_l}")
+
+            mendi.on("frame", fnirs_callback)
+            await mendi.start_streaming()
+
+            # ── Launch the game now that we're connected ──
+            game_process = launch_game()
+
+            print("Press Ctrl+C to stop recording and save\n")
+
+            try:
+                while mendi.is_connected:
+                    # Also stop if the game window was closed
+                    if game_process and game_process.poll() is not None:
+                        print("\n🎮 Game closed — stopping recording...")
+                        break
+                    await asyncio.sleep(1)
+            except KeyboardInterrupt:
+                print("\n\n⏹️  Stopping recording...")
+
+            await mendi.stop_streaming()
+
+            # Clean up game process if still running
+            if game_process and game_process.poll() is None:
+                game_process.terminate()
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+    finally:
+        save_to_csv()
+
+
+# -------------------------------------------------------------------------
 # Entry Point
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
@@ -318,10 +400,17 @@ if __name__ == "__main__":
     if args.record:
         SAVE_FOLDER = Path(__file__).parent / "data"
         SAVE_FOLDER.mkdir(exist_ok=True)
-        FIXED_FILENAME = "eeg_recording.csv"
         GAME_SCRIPT = Path(__file__).parent / "data_recorder.py"
 
+        if config.DEVICE_MODE == "fnirs":
+            FIXED_FILENAME = "fnirs_recording.csv"
+        else:
+            FIXED_FILENAME = "eeg_recording.csv"
+
     try:
-        asyncio.run(record_eeg())
+        if config.DEVICE_MODE == "fnirs":
+            asyncio.run(record_fnirs())
+        else:
+            asyncio.run(record_eeg())
     except KeyboardInterrupt:
         print("\n👋 Exiting...")

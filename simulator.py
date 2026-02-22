@@ -58,7 +58,7 @@ def simulate(model, seed=0):
     game = GameState(seed=seed)
     frames = []
     current_decision = 0
-    smooth_filter = SmoothDecisionFilter(min_hold=2)
+    smooth_filter = SmoothDecisionFilter(min_hold=1)
 
     # 8 decisions per second = every FPS/8 frames ≈ every 7-8 frames
     decision_interval = max(1, FPS // 8)

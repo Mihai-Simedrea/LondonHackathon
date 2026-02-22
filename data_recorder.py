@@ -118,40 +118,41 @@ def main():
 
     # Recording state
     recording_file = None
-    second_counter = 0
-    frame_in_second = 0
-    last_decision = 0       # last decision in this second (for JSONL)
+    record_counter = 0
+    frame_in_tick = 0
+    RECORD_INTERVAL = 6     # record every 6 frames (~10 Hz at 60 fps)
+    last_decision = 0       # last decision in this tick (for JSONL)
     pending_decision = 0    # decision to apply this frame (consumed after one step)
 
     def start_game():
-        nonlocal game_state, recording_file, second_counter, frame_in_second
+        nonlocal game_state, recording_file, record_counter, frame_in_tick
         nonlocal last_decision, pending_decision, obs_colors, key_cd
         seed = int(time.time() * 1000) % (2**31)
         game_state = GameState(seed=seed)
         obs_colors = {}
         key_cd = 0
-        second_counter = 0
-        frame_in_second = 0
+        record_counter = 0
+        frame_in_tick = 0
         last_decision = 0
         pending_decision = 0
         recording_file = open(config.GAME_JSONL, "a")
-        print(f"[recorder] Recording to {config.GAME_JSONL}")
+        print(f"[recorder] Recording to {config.GAME_JSONL} (~{FPS // RECORD_INTERVAL} Hz)")
 
     def stop_recording(final_score):
         nonlocal recording_file
         if recording_file:
             recording_file.close()
             recording_file = None
-            print(f"[recorder] Stopped. Score: {final_score}, seconds recorded: {second_counter}")
+            print(f"[recorder] Stopped. Score: {final_score}, records: {record_counter}")
 
     def write_record():
-        nonlocal second_counter
+        nonlocal record_counter
         if not recording_file or not game_state:
             return
         obs_list = [[o.lane, round(o.y / HEIGHT, 4)] for o in game_state.obstacles]
         record = {
             "t": round(time.time(), 2),
-            "sec": second_counter,
+            "sec": record_counter,
             "lane": game_state.player.lane,
             "obs": obs_list,
             "decision": last_decision,
@@ -160,7 +161,7 @@ def main():
         }
         recording_file.write(json.dumps(record) + "\n")
         recording_file.flush()
-        second_counter += 1
+        record_counter += 1
 
     pygame.key.set_repeat(0, 0)
 
@@ -214,13 +215,13 @@ def main():
                 if id(o) not in obs_colors:
                     obs_colors[id(o)] = color_rng.choice(C_OBS)
 
-            frame_in_second += 1
+            frame_in_tick += 1
 
-            # Record every 60 frames (1 second)
-            if frame_in_second >= FPS:
+            # Record every RECORD_INTERVAL frames (~10 Hz)
+            if frame_in_tick >= RECORD_INTERVAL:
                 write_record()
-                frame_in_second = 0
-                last_decision = 0  # reset for next second
+                frame_in_tick = 0
+                last_decision = 0  # reset for next tick
 
             # Check death
             if not game_state.alive:

@@ -31,7 +31,7 @@ def heuristic_decision(game_state):
         return 0   # stay
 
 
-def generate_synthetic_eeg(duration_seconds, sample_rate=250):
+def generate_synthetic_eeg(duration_seconds, sample_rate=250, base_time=None):
     """
     Generate synthetic EEG data (20 channels) with OC-correlated spectral properties.
 
@@ -48,8 +48,8 @@ def generate_synthetic_eeg(duration_seconds, sample_rate=250):
     transition_point = int(0.6 * n_samples)
     t = np.arange(n_samples) / sample_rate
 
-    # Base timestamp
-    base_time = time.time()
+    if base_time is None:
+        base_time = time.time()
     data[:, 0] = base_time + t
 
     for ch in range(n_channels):
@@ -90,96 +90,175 @@ def generate_synthetic_eeg(duration_seconds, sample_rate=250):
     return data
 
 
-def generate_synthetic_game(duration_seconds):
+def generate_synthetic_game(duration_seconds, base_time=None):
     """
     Generate synthetic game recording using heuristic AI with OC-correlated noise.
 
+    Records at ~10 Hz (every 6 frames) to capture close-obstacle scenarios.
     First 60%: good decisions (heuristic AI, ~90% optimal)
     Last 40%: bad decisions (70% corrupted toward nearest obstacle)
 
-    Returns: list of per-second game state dicts
+    Returns: list of game state dicts
     """
+    RECORD_INTERVAL = 6  # match data_recorder.py
     game = GameState(seed=42)
     records = []
     transition_sec = int(0.6 * duration_seconds)
-    base_time = time.time()
+    if base_time is None:
+        base_time = time.time()
     rng = np.random.RandomState(42)
 
-    for sec in range(duration_seconds):
+    total_frames = duration_seconds * FPS
+    decision = 0
+    record_idx = 0
+
+    for frame in range(total_frames):
         if not game.alive:
-            # Restart the game to keep generating data
-            game = GameState(seed=42 + sec)
+            game = GameState(seed=42 + frame)
 
-        # Get heuristic decision
-        decision = heuristic_decision(game)
+        current_sec = frame // FPS
 
-        # In low-OC period (last 40%), corrupt 70% of decisions with
-        # actively bad choices (move toward nearest obstacle)
-        if sec >= transition_sec:
-            if rng.random() < 0.70:
-                distances = game.get_nearest_obstacles()
-                worst_lane = min(range(LANE_COUNT), key=lambda i: distances[i])
-                current_lane = game.player.lane
-                if worst_lane < current_lane:
-                    decision = -1
-                elif worst_lane > current_lane:
-                    decision = 1
-                else:
-                    decision = 0
+        # Make a new decision every second (every FPS frames)
+        if frame % FPS == 0:
+            decision = heuristic_decision(game)
 
-        # Record state BEFORE stepping
-        state = game.encode()
-        record = {
-            "t": base_time + sec,
-            "sec": sec,
-            "lane": state["lane"],
-            "obs": state["obs"],
-            "decision": decision,
-            "score": state["score"],
-            "alive": state["alive"]
-        }
-        records.append(record)
+            if current_sec >= transition_sec:
+                if rng.random() < 0.70:
+                    distances = game.get_nearest_obstacles()
+                    worst_lane = min(range(LANE_COUNT), key=lambda i: distances[i])
+                    current_lane = game.player.lane
+                    if worst_lane < current_lane:
+                        decision = -1
+                    elif worst_lane > current_lane:
+                        decision = 1
+                    else:
+                        decision = 0
 
-        # Step game for 1 second (FPS frames)
-        for frame in range(FPS):
-            if frame == 0:
-                game.step(decision)
-            else:
-                game.step(0)
+        # Record at RECORD_INTERVAL
+        if frame % RECORD_INTERVAL == 0:
+            state = game.encode()
+            record = {
+                "t": round(base_time + frame / FPS, 2),
+                "sec": record_idx,
+                "lane": state["lane"],
+                "obs": state["obs"],
+                "decision": decision,
+                "score": state["score"],
+                "alive": state["alive"]
+            }
+            records.append(record)
+            record_idx += 1
 
-            if not game.alive:
-                break
+        # Step game
+        if frame % FPS == 0:
+            game.step(decision)
+        else:
+            game.step(0)
+
+        if not game.alive:
+            continue
 
     return records
 
 
+def generate_synthetic_fnirs(duration_seconds, sample_rate=11, base_time=None):
+    """
+    Generate synthetic fNIRS data with OC-correlated hemodynamic patterns.
+
+    First 60%: high OC (strong IR/Red = high blood oxygenation)
+    Last 40%: low OC (declining optical signals = fatigue)
+
+    Returns: numpy array shape (n_samples, 11) — timestamp + 10 optical/temp channels
+    """
+    n_samples = duration_seconds * sample_rate
+
+    if base_time is None:
+        base_time = time.time()
+
+    t = np.arange(n_samples) / sample_rate
+    transition_point = int(0.6 * n_samples)
+    transition_width = int(0.05 * n_samples)
+
+    # Blend factor: 1.0 = high OC, 0.0 = low OC
+    blend = np.ones(n_samples)
+    blend[transition_point:transition_point + transition_width] = np.linspace(1, 0, transition_width)
+    blend[transition_point + transition_width:] = 0
+
+    noise = np.random.randn(n_samples) * 50
+
+    # Typical Mendi ADC values: IR ~15000-25000, Red ~2000-4000, Amb ~-500-0
+    # High OC: strong IR (high blood oxygenation), moderate Red
+    # Low OC: declining IR (less oxygenation), rising Red (more deoxygenated Hb)
+    ir_base = 20000
+    red_base = 3000
+
+    ir_l = ir_base + blend * 5000 - (1 - blend) * 3000 + noise
+    red_l = red_base + (1 - blend) * 1500 - blend * 500 + noise * 0.3
+    amb_l = -300 + np.random.randn(n_samples) * 50
+
+    ir_r = ir_base + blend * 4500 - (1 - blend) * 2800 + noise * 0.9
+    red_r = red_base + (1 - blend) * 1400 - blend * 450 + noise * 0.25
+    amb_r = -250 + np.random.randn(n_samples) * 45
+
+    # Pulse channel (short-distance, mostly motion artifact reference)
+    ir_p = 180000 + np.random.randn(n_samples) * 500
+    red_p = 75000 + np.random.randn(n_samples) * 300
+    amb_p = -2300 + np.random.randn(n_samples) * 100
+
+    temp = 32.0 + blend * 1.5 + np.random.randn(n_samples) * 0.2
+
+    data = np.column_stack([
+        base_time + t,
+        ir_l, red_l, amb_l,
+        ir_r, red_r, amb_r,
+        ir_p, red_p, amb_p,
+        temp,
+    ])
+
+    return data
+
+
 def generate_synthetic(duration_seconds=600):
     """
-    Generate complete synthetic dataset.
+    Generate complete synthetic dataset (EEG or fNIRS based on config.DEVICE_MODE).
 
     Args:
         duration_seconds: total seconds of simulated gameplay (default 600 = 10 min)
 
     Returns:
-        tuple: (eeg_csv_path, game_jsonl_path)
+        tuple: (brain_csv_path, game_jsonl_path)
     """
-    print(f"Generating {duration_seconds}s of synthetic data...")
+    mode = config.DEVICE_MODE
+    print(f"Generating {duration_seconds}s of synthetic data ({mode.upper()} mode)...")
 
-    # Generate EEG data
-    print("  Generating synthetic EEG...")
-    eeg_data = generate_synthetic_eeg(duration_seconds)
+    base_time = time.time()
 
-    eeg_path = config.DATA_DIR / "eeg_recording.csv"
-    with open(eeg_path, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["timestamp"] + config.CHANNEL_NAMES)
-        for row in eeg_data:
-            writer.writerow(row.tolist())
-    print(f"  Saved EEG: {eeg_path} ({len(eeg_data)} samples)")
+    if mode == "fnirs":
+        print("  Generating synthetic fNIRS...")
+        fnirs_data = generate_synthetic_fnirs(duration_seconds, base_time=base_time)
+
+        brain_path = config.FNIRS_CSV
+        with open(brain_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(["timestamp"] + config.FNIRS_CHANNEL_NAMES)
+            for row in fnirs_data:
+                writer.writerow([round(v, 4) for v in row.tolist()])
+        print(f"  Saved fNIRS: {brain_path} ({len(fnirs_data)} samples)")
+    else:
+        print("  Generating synthetic EEG...")
+        eeg_data = generate_synthetic_eeg(duration_seconds, base_time=base_time)
+
+        brain_path = config.EEG_CSV
+        with open(brain_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(["timestamp"] + config.CHANNEL_NAMES)
+            for row in eeg_data:
+                writer.writerow(row.tolist())
+        print(f"  Saved EEG: {brain_path} ({len(eeg_data)} samples)")
 
     # Generate game data
     print("  Generating synthetic game recordings...")
-    game_records = generate_synthetic_game(duration_seconds)
+    game_records = generate_synthetic_game(duration_seconds, base_time=base_time)
 
     game_path = config.DATA_DIR / "game_recording.jsonl"
     with open(game_path, 'w') as f:
@@ -187,16 +266,14 @@ def generate_synthetic(duration_seconds=600):
             f.write(json.dumps(record) + '\n')
     print(f"  Saved game: {game_path} ({len(game_records)} records)")
 
-    # Print summary
     high_oc_count = int(0.6 * len(game_records))
     low_oc_count = len(game_records) - high_oc_count
     print(f"\n  Summary:")
-    print(f"    Total seconds: {len(game_records)}")
-    print(f"    High OC (first 60%): {high_oc_count}s")
-    print(f"    Low OC (last 40%): {low_oc_count}s")
-    print(f"    Corrupted decisions in low-OC: ~{int(low_oc_count * 0.70)}")
+    print(f"    Total records: {len(game_records)}")
+    print(f"    High OC (first 60%): {high_oc_count}")
+    print(f"    Low OC (last 40%): {low_oc_count}")
 
-    return eeg_path, game_path
+    return brain_path, game_path
 
 
 if __name__ == "__main__":

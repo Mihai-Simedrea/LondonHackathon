@@ -11,12 +11,23 @@ RESULTS_DIR = PROJECT_DIR / "results"
 for d in [DATA_DIR, MODELS_DIR, RESULTS_DIR]:
     d.mkdir(exist_ok=True)
 
+# ── Device mode: "fnirs" or "eeg" ──
+DEVICE_MODE = "fnirs"
+
 # EEG settings
 SAMPLE_RATE = 250
 FRONTAL_CHANNELS = [0, 1, 2, 9]  # Fp1, Fp2, Fpz, Fz
 CHANNEL_NAMES = [
     "Fp1", "Fp2", "Fpz", "Cp1", "-", "-", "T7", "-", "O1", "Fz",
     "O2", "Cp2", "T8", "-", "Oz", "P3", "P4", "P7", "Cz", "P8"
+]
+
+# fNIRS settings
+FNIRS_SAMPLE_RATE = 11
+FNIRS_BASELINE_SEC = 30
+FNIRS_CHANNEL_NAMES = [
+    "ir_l", "red_l", "amb_l", "ir_r", "red_r", "amb_r",
+    "ir_p", "red_p", "amb_p", "temp"
 ]
 
 # OC score settings
@@ -41,6 +52,8 @@ BATCH_SIZE = 10
 
 # File paths
 EEG_CSV = DATA_DIR / "eeg_recording.csv"
+FNIRS_CSV = DATA_DIR / "fnirs_recording.csv"
+BRAIN_CSV = FNIRS_CSV if DEVICE_MODE == "fnirs" else EEG_CSV
 GAME_JSONL = DATA_DIR / "game_recording.jsonl"
 OC_SCORES_CSV = DATA_DIR / "oc_scores.csv"
 DATASET_DIRTY = DATA_DIR / "dataset_dirty.csv"
