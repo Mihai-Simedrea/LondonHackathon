@@ -56,7 +56,7 @@ export function initFnirsHeatmapPage() {
       <div class="card fnirs-header">
         <div class="fnirs-title">
           <h1>fNIRS HEATMAP</h1>
-          <p>Standalone 3D prefrontal proxy heatmap for Mendi fNIRS data (CSV playback + live backend bridge).</p>
+          <p>Standalone 3D prefrontal proxy heatmap for fNIRS data (CSV playback + live backend bridge).</p>
         </div>
         <div id="delay-badge" class="fnirs-badge">Displaying brain response with ~6–7s physiological delay (hemodynamic lag), not network latency.</div>
       </div>
@@ -72,7 +72,7 @@ export function initFnirsHeatmapPage() {
       </div>
 
       <div class="card fnirs-status-row">
-        <div id="fnirs-status" class="fnirs-status">Load an fNIRS CSV or connect a Mendi headset.</div>
+        <div id="fnirs-status" class="fnirs-status">Load an fNIRS CSV or connect a local headset integration.</div>
         <div class="fnirs-legend">
           <div class="fnirs-legend-gradient"></div>
           <span>Cold ↔ Warm</span>
@@ -155,7 +155,7 @@ export function initFnirsHeatmapPage() {
           <div class="card">
             <h3>Notes</h3>
             <div class="fnirs-small" id="fnirs-notes">
-              Proxy prefrontal heatmap from sparse Mendi channels. This is not cross-sectional or volumetric brain imaging.
+              Proxy prefrontal heatmap from sparse fNIRS channels. This is not cross-sectional or volumetric brain imaging.
             </div>
           </div>
         </div>
@@ -404,7 +404,7 @@ export function initFnirsHeatmapPage() {
       state.displayTs = currentWindow()?.timestamp ?? null;
       state.sensorNowTs = state.displayTs != null ? state.displayTs + state.displayDelaySec : null;
       setStatus(`CSV loaded`);
-      setNotes(payload.disclaimer || 'Proxy prefrontal heatmap from sparse Mendi channels.');
+      setNotes(payload.disclaimer || 'Proxy prefrontal heatmap from sparse fNIRS channels.');
       renderCurrentFrame();
     } catch (err) {
       setStatus(`CSV load failed: ${String((err as Error)?.message || err)}`, true);

@@ -60,11 +60,11 @@ def build_pfc_proxy_mapping(mesh: BrainMesh) -> PfcMapping:
 
     anchors = {
         'left_pfc': {
-            'label': 'Mendi Left',
+            'label': 'fNIRS Left',
             'xyz': [float(x) for x in left_anchor.tolist()],
         },
         'right_pfc': {
-            'label': 'Mendi Right',
+            'label': 'fNIRS Right',
             'xyz': [float(x) for x in right_anchor.tolist()],
         },
     }

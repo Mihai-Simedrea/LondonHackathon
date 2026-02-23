@@ -15,12 +15,7 @@ from pathlib import Path
 import numpy as np
 from scipy.signal import welch
 
-from mendi.signal_processor import (
-    EPSILON_MATRIX,
-    PATH_LENGTH,
-    intensity_to_od,
-    od_to_concentrations,
-)
+from neurolabel.brain.fnirs.signal_math import intensity_to_od, od_to_concentrations
 
 DEFAULT_SAMPLE_RATE = 250
 DEFAULT_FNIRS_SAMPLE_RATE = 11
@@ -265,7 +260,7 @@ def compute_oc_scores_eeg(eeg_csv_path, output_path=None, trim_before=None, incl
 
 def compute_oc_scores_fnirs(fnirs_csv_path, output_path=None, trim_before=None, include_timestamp_in_csv=False):
     """
-    Compute OC scores from raw fNIRS CSV (Mendi headband).
+    Compute OC scores from raw fNIRS CSV (private local headset integration).
 
     Uses the Modified Beer-Lambert Law (MBLL) to convert raw optical
     intensities into HbO/HbR concentration changes per sliding window.
@@ -362,11 +357,11 @@ def compute_oc_scores_fnirs(fnirs_csv_path, output_path=None, trim_before=None, 
         win_l = intensity_l[start : start + window_samples]
         win_r = intensity_r[start : start + window_samples]
 
-        # Delta optical density for this window (uses mendi helpers)
+        # Delta optical density for this window (generic MBLL helpers)
         dod_l = intensity_to_od(win_l, baseline_l)   # shape (win, 2)
         dod_r = intensity_to_od(win_r, baseline_r)
 
-        # MBLL inversion -> [dHbO, dHbR] in uM (uses mendi helper)
+        # MBLL inversion -> [dHbO, dHbR] in uM (generic MBLL helper)
         conc_l = od_to_concentrations(dod_l)  # shape (win, 2)
         conc_r = od_to_concentrations(dod_r)
 

@@ -67,7 +67,7 @@ python3 scripts/neurolabel demo --synthetic --backend metadrive --device fnirs -
 ### Devices
 
 - `eeg` — BLE headset recording path supported
-- `fnirs` — Mendi recording path supported
+- `fnirs` — recording via optional local private integration (public repo ships mock/synthetic paths)
 
 ## Where Outputs Go
 

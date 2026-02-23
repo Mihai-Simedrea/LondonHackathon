@@ -279,10 +279,10 @@ EEG BLE path (extracted from `server.py`):
 - CSV output via `save_buffer_to_csv`
 - optional game process lifecycle integration
 
-#### `fnirs_mendi.py`
-Mendi fNIRS path:
+#### `fnirs_device.py`
+fNIRS acquisition path (optional local private provider):
 
-- `MendiClient` stream subscription
+- provider client stream subscription
 - sample buffering and CSV sink
 - optional game process lifecycle integration
 
@@ -614,7 +614,7 @@ Current baseline validation used during refactor:
 ### Hardware/manual checks (not CI)
 
 - EEG BLE connect/discover/notify/record/stop
-- Mendi fNIRS connect/stream/record/stop
+- fNIRS connect/stream/record/stop (optional local private provider)
 - game process lifecycle coupling in acquisition sessions
 
 ## Known Limitations (Current State)

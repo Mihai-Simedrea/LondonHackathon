@@ -4,7 +4,7 @@ from __future__ import annotations
 MetaDrive — Human Play + Brain Recorder
 
 Launches MetaDrive with keyboard control and optionally records fNIRS brain
-data from the Mendi headband in a background thread. Everything in one file.
+data from a local private headset integration in a background thread. Everything in one file.
 
 Usage:
     python metadrive_recorder.py              # game + brain recording
@@ -23,6 +23,7 @@ import numpy as np
 from metadrive import MetaDriveEnv
 
 import config
+from neurolabel.brain.acquisition.fnirs_provider import get_private_fnirs_client_class
 from neurolabel.backends.metadrive.env import extract_features, _build_env_config
 from neurolabel.backends.metadrive.action_space import (
     continuous_to_discrete as _shared_continuous_to_discrete,
@@ -85,17 +86,17 @@ def _episode_end_reason(info):
 
 # ── Brain recording (background thread) ──────────────────
 def _run_brain_recording(output_path, stop_event):
-    """Connect to Mendi headband and stream fNIRS data to CSV.
+    """Connect to a local private fNIRS device and stream data to CSV.
 
     Runs in a daemon thread with its own asyncio event loop.
     """
     import asyncio
 
     async def _record():
-        from mendi.ble_client import MendiClient
+        FnirsClient = get_private_fnirs_client_class()
 
-        async with MendiClient() as mendi:
-            print("[brain] Connected to Mendi headband")
+        async with FnirsClient() as device:
+            print("[brain] Connected to local fNIRS device")
 
             with open(output_path, "w", newline="") as f:
                 writer = csv.writer(f)
@@ -116,13 +117,13 @@ def _run_brain_recording(output_path, stop_event):
                         f.flush()
                         print(f"  [brain] {count} frames recorded")
 
-                mendi.on("frame", on_frame)
-                await mendi.start_streaming()
+                device.on("frame", on_frame)
+                await device.start_streaming()
 
                 while not stop_event.is_set():
                     await asyncio.sleep(0.5)
 
-                await mendi.stop_streaming()
+                await device.stop_streaming()
                 f.flush()
 
             print(f"[brain] Saved {count} frames to {output_path}")
@@ -140,7 +141,7 @@ def record_session(seed=None, max_episodes=None, max_seconds=None, record_brain=
         seed:          Starting scenario seed (default: time-based).
         max_episodes:  Stop after this many episodes (default: unlimited).
         max_seconds:   Stop after this many seconds (default: unlimited).
-        record_brain:  If True, try to connect to Mendi headband for fNIRS.
+        record_brain:  If True, try to connect to a local private fNIRS device.
 
     Returns:
         dict with session summary.
@@ -154,7 +155,7 @@ def record_session(seed=None, max_episodes=None, max_seconds=None, record_brain=
     if record_brain:
         config.DATA_DIR.mkdir(parents=True, exist_ok=True)
         brain_path = config.FNIRS_CSV
-        print("[brain] Connecting to Mendi headband...")
+        print("[brain] Connecting to local fNIRS device...")
         brain_thread = threading.Thread(
             target=_run_brain_recording,
             args=(brain_path, brain_stop),

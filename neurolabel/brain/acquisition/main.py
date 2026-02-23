@@ -30,7 +30,7 @@ async def record_eeg(*, save_folder: Path, game_script: Path, fixed_filename: st
 
 
 async def record_fnirs(*, save_folder: Path, game_script: Path, fixed_filename: str | None):
-    from neurolabel.brain.acquisition.fnirs_mendi import record_fnirs_session
+    from neurolabel.brain.acquisition.fnirs_device import record_fnirs_session
 
     return await record_fnirs_session(save_folder=save_folder, game_script=game_script, fixed_filename=fixed_filename)
 

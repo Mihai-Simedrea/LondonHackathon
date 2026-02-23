@@ -6,3 +6,10 @@ models/
 results/
 catboost_info/
 *.joblib
+
+# Private/local device integrations (not for public repo)
+mendi/
+neurolabel/mendi/
+private_fnirs_provider.py
+private_fnirs/
+local_fnirs_provider.py

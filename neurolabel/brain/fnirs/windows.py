@@ -155,7 +155,7 @@ def load_fnirs_csv_text(csv_text: str, *, trim_before: float | None = None) -> F
     reader = _dict_reader_from_text(csv_text)
     header = list(reader.fieldnames or [])
     if 'ir_l' not in header or 'red_l' not in header:
-        raise FnirsCsvError('CSV does not look like Mendi fNIRS data (missing ir_l/red_l columns)')
+        raise FnirsCsvError('CSV does not look like supported fNIRS data (missing ir_l/red_l columns)')
     return series_from_rows(reader, trim_before=trim_before)
 
 
@@ -164,7 +164,7 @@ def load_fnirs_csv(path: str | Path, *, trim_before: float | None = None) -> Fni
         reader = csv.DictReader(f)
         header = list(reader.fieldnames or [])
         if 'ir_l' not in header or 'red_l' not in header:
-            raise FnirsCsvError(f'CSV at {path} does not look like Mendi fNIRS data')
+            raise FnirsCsvError(f'CSV at {path} does not look like supported fNIRS data')
         return series_from_rows(reader, trim_before=trim_before)
 
 

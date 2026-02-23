@@ -192,7 +192,7 @@ def generate_synthetic_fnirs(duration_seconds, sample_rate=11, base_time=None):
 
     noise = np.random.randn(n_samples) * 50
 
-    # Typical Mendi ADC values: IR ~15000-25000, Red ~2000-4000, Amb ~-500-0
+    # Typical consumer fNIRS ADC values: IR ~15000-25000, Red ~2000-4000, Amb ~-500-0
     # High OC: strong IR (high blood oxygenation), moderate Red
     # Low OC: declining IR (less oxygenation), rising Red (more deoxygenated Hb)
     ir_base = 20000

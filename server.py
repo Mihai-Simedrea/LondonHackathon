@@ -29,7 +29,7 @@ async def record_eeg():
 
 
 async def record_fnirs():
-    from neurolabel.brain.acquisition.fnirs_mendi import record_fnirs_session
+    from neurolabel.brain.acquisition.fnirs_device import record_fnirs_session
 
     return await record_fnirs_session(
         save_folder=SAVE_FOLDER,
@@ -48,4 +48,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
-

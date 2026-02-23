@@ -8,6 +8,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from neurolabel.brain.acquisition.fnirs_provider import get_private_fnirs_client_class
 from neurolabel.brain.fnirs import compute_window_metrics_sequence, series_from_rows
 from neurolabel.ui.replay.brain3d.mesh_loader import load_brain_mesh
 from neurolabel.ui.replay.brain3d.pfc_mapping import build_pfc_proxy_mapping
@@ -118,7 +119,7 @@ class FnirsLiveService:
                         'colorscale': 'RdBu_r',
                         'symmetric_scale': True,
                     },
-                    'disclaimer': 'Proxy prefrontal heatmap from sparse Mendi channels; not volumetric imaging.',
+                    'disclaimer': 'Proxy prefrontal heatmap from sparse fNIRS channels; not volumetric imaging.',
                 })
         return q
 
@@ -135,7 +136,7 @@ class FnirsLiveService:
         return {
             'schema_version': 1,
             'source': {
-                'device': 'mendi',
+                'device': 'private_local',
                 'mode': 'fnirs',
                 'stage': 'raw_optical_proxy',
                 'filename': filename,
@@ -149,7 +150,7 @@ class FnirsLiveService:
                 'colorscale': 'RdBu_r',
                 'symmetric_scale': True,
             },
-            'disclaimer': 'Proxy prefrontal heatmap from sparse Mendi channels; not volumetric imaging.',
+            'disclaimer': 'Proxy prefrontal heatmap from sparse fNIRS channels; not volumetric imaging.',
             'sample_rate_est_hz': seq.sample_rate_est_hz,
         }
 
@@ -251,7 +252,7 @@ class FnirsLiveService:
             if self._mock_mode:
                 self._run_mock_worker()
             else:
-                asyncio.run(self._run_mendi_worker())
+                asyncio.run(self._run_device_worker())
         except Exception as exc:
             with self._lock:
                 self._last_error = str(exc)
@@ -279,7 +280,7 @@ class FnirsLiveService:
                 time.sleep(min(0.01, next_tick - now))
                 continue
             t = now - start
-            # Simulated Mendi-like channels (left/right drift with opposite-phase modulations)
+            # Simulated fNIRS-like channels (left/right drift with opposite-phase modulations)
             ir_l = 20000 + 900 * (0.7 + 0.3 * __import__('math').sin(t * 0.6)) + 100 * __import__('math').sin(t * 2.3)
             red_l = 3000 + 300 * (0.4 + 0.6 * __import__('math').sin(t * 0.5 + 0.4))
             amb_l = -250 + 15 * __import__('math').sin(t * 3.0)
@@ -300,10 +301,10 @@ class FnirsLiveService:
             self._emit_delayed_heatmap_if_ready()
             next_tick += sample_period
 
-    async def _run_mendi_worker(self) -> None:
-        from mendi.ble_client import MendiClient
+    async def _run_device_worker(self) -> None:
+        FnirsClient = get_private_fnirs_client_class()
 
-        async with MendiClient() as mendi:
+        async with FnirsClient() as device:
             with self._lock:
                 self._connected = True
             self._broadcast({'type': 'fnirs_status', **self.status()})
@@ -317,20 +318,20 @@ class FnirsLiveService:
                     'temp': float(pkt.temp),
                 })
 
-            mendi.on('frame', _on_frame)
-            await mendi.start_streaming()
+            device.on('frame', _on_frame)
+            await device.start_streaming()
             with self._lock:
                 self._streaming = True
             self._broadcast({'type': 'fnirs_status', **self.status()})
 
             try:
-                while not self._stop_event.is_set() and mendi.is_connected:
+                while not self._stop_event.is_set() and device.is_connected:
                     self._emit_delayed_heatmap_if_ready()
                     await asyncio.sleep(0.25)
             finally:
                 try:
-                    if mendi.is_streaming:
-                        await mendi.stop_streaming()
+                    if device.is_streaming:
+                        await device.stop_streaming()
                 except Exception:
                     pass
 

@@ -27,7 +27,7 @@ def run_doctor(settings: Settings) -> list[Check]:
     checks.append(Check("scipy", _has_module("scipy"), "required for OC scoring"))
     checks.append(Check("sklearn", _has_module("sklearn"), "required for sklearn models"))
     checks.append(Check("joblib", _has_module("joblib"), "required for model persistence"))
-    checks.append(Check("bleak", _has_module("bleak"), "required for EEG BLE / Mendi"))
+    checks.append(Check("bleak", _has_module("bleak"), "required for EEG BLE / local fNIRS integration"))
     checks.append(Check("metadrive", _has_module("metadrive"), "required for MetaDrive backend"))
     checks.append(Check("torch", _has_module("torch"), "optional for torch experiments"))
     checks.append(Check("catboost", _has_module("catboost"), "optional for compare experiment"))
